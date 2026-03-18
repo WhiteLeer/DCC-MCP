@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:/Program Files/Side Effects Software/Houdini 20.5.487/bin/hython.exe\" -c \"import sys; print\\('\\\\n'.join\\(sys.path\\)\\)\")",
+      "Bash(\"C:/Program Files/Side Effects Software/Houdini 20.5.487/bin/hython.exe\" -c \"import houdini_mcp.server_with_gui; print\\('Module import: OK'\\)\" 2>&1)",
+      "Bash(tasklist:*)",
+      "Bash(netstat:*)",
+      "Bash(echo:*)",
+      "Bash(cd:*)",
+      "Bash(taskkill:*)",
+      "Bash(python:*)"
+    ]
+  }
+}
