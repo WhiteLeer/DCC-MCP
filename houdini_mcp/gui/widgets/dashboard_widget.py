@@ -48,8 +48,9 @@ class StatusCard(QFrame):
 class DashboardWidget(QWidget):
     """Dashboard tab content."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, dcc_name: str = "Houdini"):
         super().__init__(parent)
+        self.dcc_name = dcc_name
 
         self._init_ui()
 
@@ -87,7 +88,7 @@ class DashboardWidget(QWidget):
         self.ws_card = StatusCard("WebSocket", "—")
         cards_layout.addWidget(self.ws_card, 1, 1)
 
-        self.hip_card = StatusCard("HIP 文件", "—")
+        self.hip_card = StatusCard("场景文件", "—")
         cards_layout.addWidget(self.hip_card, 1, 2)
 
         layout.addLayout(cards_layout)
@@ -97,7 +98,7 @@ class DashboardWidget(QWidget):
         connection_layout = QVBoxLayout()
 
         self.claude_status = QLabel("后台服务: 检查中...")
-        self.houdini_detail = QLabel("Houdini 会话: 检查中...")
+        self.houdini_detail = QLabel(f"{self.dcc_name} 会话: 检查中...")
 
         connection_layout.addWidget(self.claude_status)
         connection_layout.addWidget(self.houdini_detail)
@@ -139,16 +140,16 @@ class DashboardWidget(QWidget):
             self.houdini_status_card.set_value(node_text)
             self.houdini_status_card.value_label.setStyleSheet("color: #2ecc71;")
             if hip_file:
-                self.houdini_detail.setText(f"Houdini 会话: ✓ 已加载 ({hip_file})")
+                self.houdini_detail.setText(f"{self.dcc_name} 会话: ✓ 已加载 ({hip_file})")
                 self.hip_card.set_value(self._short_path(hip_file))
             else:
-                self.houdini_detail.setText("Houdini 会话: ✓ 已连接")
+                self.houdini_detail.setText(f"{self.dcc_name} 会话: ✓ 已连接")
                 self.hip_card.set_value("—")
             self.houdini_detail.setStyleSheet("color: #2ecc71;")
         else:
             self.houdini_status_card.set_value("✗ 未找到")
             self.houdini_status_card.value_label.setStyleSheet("color: #e74c3c;")
-            self.houdini_detail.setText("Houdini 会话: ✗ 未运行")
+            self.houdini_detail.setText(f"{self.dcc_name} 会话: ✗ 未运行")
             self.houdini_detail.setStyleSheet("color: #e74c3c;")
             self.hip_card.set_value("—")
 

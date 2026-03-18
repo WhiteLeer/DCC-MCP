@@ -14,8 +14,9 @@ import os
 class LogsWidget(QWidget):
     """Logs tab."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, log_dir_prefix: str = "houdini-mcp"):
         super().__init__(parent)
+        self._log_dir_prefix = log_dir_prefix
         self._entries: list[dict] = []
 
         self._init_ui()
@@ -130,10 +131,11 @@ class LogsWidget(QWidget):
         """Load recent daemon/bridge/gui logs from disk."""
         self._entries.clear()
         log_root = Path.home() / ".mcp_logs"
+        prefix = self._log_dir_prefix
         targets = [
-            ("daemon", log_root / "houdini-mcp-daemon" / "houdini-mcp-daemon_latest.log"),
-            ("bridge", log_root / "houdini-mcp-bridge" / "houdini-mcp-bridge_latest.log"),
-            ("gui", log_root / "houdini-mcp-gui" / "houdini-mcp-gui_latest.log"),
+            ("daemon", log_root / f"{prefix}-daemon" / f"{prefix}-daemon_latest.log"),
+            ("bridge", log_root / f"{prefix}-bridge" / f"{prefix}-bridge_latest.log"),
+            ("gui", log_root / f"{prefix}-gui" / f"{prefix}-gui_latest.log"),
         ]
 
         for source, path in targets:

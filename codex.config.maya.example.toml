@@ -1,0 +1,8 @@
+[mcp_servers.maya_mcp]
+command = "C:/Program Files/Autodesk/Maya2026/bin/mayapy.exe"
+args = ["-u", "C:/Users/wepie/houdini-mcp/maya_mcp/server_with_gui.py"]
+
+[mcp_servers.maya_mcp.env]
+PYTHONUNBUFFERED = "1"
+PYTHONPATH = "C:/Users/wepie/houdini-mcp"
+MAYA_BIN = "C:/Program Files/Autodesk/Maya2026/bin"

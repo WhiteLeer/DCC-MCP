@@ -32,12 +32,29 @@ class MainWindow(QMainWindow):
     process_count_updated = pyqtSignal(dict)
     error_received = pyqtSignal(dict)
 
-    def __init__(self, ws_url: Optional[str] = None):
+    def __init__(
+        self,
+        ws_url: Optional[str] = None,
+        state_dir_func=None,
+        dcc_name: str = "Houdini",
+        app_title: Optional[str] = None,
+        log_dir_prefix: str = "houdini-mcp",
+        supports_restart: bool = True,
+        port_range: tuple[int, int] = (9876, 9885),
+        strict_state: bool = True,
+    ):
         super().__init__()
 
         self.ws_url = ws_url or "ws://127.0.0.1:9876"
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.connected = False
+        self.dcc_name = dcc_name
+        self.app_title = app_title or f"{dcc_name} MCP 控制面板"
+        self._state_dir_func = state_dir_func or get_state_dir
+        self._log_dir_prefix = log_dir_prefix
+        self._supports_restart = supports_restart
+        self._port_range = port_range
+        self._strict_state = strict_state
 
         self._init_ui()
         self._connect_signals()
@@ -52,7 +69,7 @@ class MainWindow(QMainWindow):
 
     def _init_ui(self):
         """Initialize UI components."""
-        self.setWindowTitle("Houdini MCP 控制面板")
+        self.setWindowTitle(self.app_title)
         self.setGeometry(100, 100, 1200, 800)
 
         # Apply dark theme
@@ -76,10 +93,10 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.tabs)
 
         # Create tabs
-        self.dashboard = DashboardWidget()
+        self.dashboard = DashboardWidget(dcc_name=self.dcc_name)
         self.operations = OperationsWidget()
-        self.logs = LogsWidget()
-        self.settings = SettingsWidget()
+        self.logs = LogsWidget(log_dir_prefix=self._log_dir_prefix)
+        self.settings = SettingsWidget(state_dir_func=self._state_dir_func, log_dir_prefix=self._log_dir_prefix)
 
         self.tabs.addTab(self.dashboard, "📊 仪表盘")
         self.tabs.addTab(self.operations, "📋 操作历史")
@@ -96,7 +113,7 @@ class MainWindow(QMainWindow):
         layout = QHBoxLayout()
 
         # Title
-        title = QLabel("⚙️ Houdini MCP 控制面板")
+        title = QLabel(f"⚙️ {self.app_title}")
         title_font = QFont()
         title_font.setPointSize(16)
         title_font.setBold(True)
@@ -120,10 +137,11 @@ class MainWindow(QMainWindow):
         self.cleanup_btn.clicked.connect(self._on_cleanup_clicked)
         layout.addWidget(self.cleanup_btn)
 
-        self.restart_btn = QPushButton("🔄 重启 Houdini")
+        self.restart_btn = QPushButton(f"🔄 重启 {self.dcc_name}")
         self.restart_btn.setEnabled(False)
         self.restart_btn.clicked.connect(self._on_restart_clicked)
-        layout.addWidget(self.restart_btn)
+        if self._supports_restart:
+            layout.addWidget(self.restart_btn)
 
         self.restart_mcp_btn = QPushButton("🔄 重启 MCP 服务器")
         self.restart_mcp_btn.setEnabled(False)
@@ -236,7 +254,7 @@ class MainWindow(QMainWindow):
         state_files: list[tuple[int, Path]] = []
 
         try:
-            state_dir = get_state_dir()
+            state_dir = self._state_dir_func()
             for path in state_dir.glob("ws_port*.json"):
                 try:
                     data = json.loads(path.read_text(encoding="utf-8"))
@@ -260,11 +278,11 @@ class MainWindow(QMainWindow):
             except Exception:
                 continue
 
-        # Fallback: scan the default range
-        for port in range(9876, 9886):
-            url = f"ws://127.0.0.1:{port}"
-            if url not in urls:
-                urls.append(url)
+        if not self._strict_state:
+            for port in range(self._port_range[0], self._port_range[1] + 1):
+                url = f"ws://127.0.0.1:{port}"
+                if url not in urls:
+                    urls.append(url)
 
         return urls
 
@@ -303,7 +321,7 @@ class MainWindow(QMainWindow):
             )
             self.dashboard.set_connection_info(
                 self.ws_url,
-                str(get_state_dir()),
+                str(self._state_dir_func()),
                 str(Path.home() / ".mcp_logs"),
             )
 
@@ -319,7 +337,7 @@ class MainWindow(QMainWindow):
             self.connection_status.setText("● 连接失败")
             self.connection_status.setStyleSheet("color: #e74c3c; font-weight: bold;")
             self.status_bar.showMessage(
-                "连接失败：等待 Houdini 后台服务启动。GUI 会自动重试，也可重新启动启动GUI.bat。"
+                "连接失败：等待后台服务启动。GUI 会自动重试。"
             )
             self.logs.add_log(
                 {
@@ -491,10 +509,12 @@ class MainWindow(QMainWindow):
 
     def _on_restart_clicked(self):
         """Handle restart Houdini button click."""
+        if not self._supports_restart:
+            return
         reply = QMessageBox.question(
             self,
-            "重启 Houdini",
-            "重启 Houdini 连接？这不会重启 MCP 服务器。",
+            f"重启 {self.dcc_name}",
+            f"重启 {self.dcc_name} 连接？这不会重启 MCP 服务器。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 

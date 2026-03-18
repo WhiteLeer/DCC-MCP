@@ -15,8 +15,10 @@ from houdini_mcp.utils.state_paths import get_ws_port_file, get_state_dir
 class SettingsWidget(QWidget):
     """Settings tab."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, state_dir_func=None, log_dir_prefix: str = "houdini-mcp"):
         super().__init__(parent)
+        self._state_dir_func = state_dir_func or get_state_dir
+        self._log_dir_prefix = log_dir_prefix
 
         self._init_ui()
 
@@ -40,12 +42,12 @@ class SettingsWidget(QWidget):
 
         self.state_dir_input = QLineEdit()
         self.state_dir_input.setReadOnly(True)
-        self.state_dir_input.setText(str(get_state_dir()))
+        self.state_dir_input.setText(str(self._state_dir_func()))
         runtime_layout.addRow("状态目录:", self.state_dir_input)
 
         self.log_dir_input = QLineEdit()
         self.log_dir_input.setReadOnly(True)
-        self.log_dir_input.setText(os.path.expanduser("~/.mcp_logs"))
+        self.log_dir_input.setText(os.path.expanduser(f"~/.mcp_logs/{self._log_dir_prefix}-daemon"))
         runtime_layout.addRow("日志目录:", self.log_dir_input)
 
         runtime_group.setLayout(runtime_layout)

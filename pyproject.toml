@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "houdini-mcp"
+name = "dcc-mcp"
 version = "0.1.0"
 description = "Model Context Protocol server for Houdini SOP operations"
 readme = "README.md"
@@ -12,7 +12,7 @@ authors = [
     {name = "WhiteLeer", email = "master@example.com"}
 ]
 license = {text = "MIT"}
-keywords = ["houdini", "mcp", "ai", "dcc", "3d"]
+keywords = ["houdini", "maya", "mcp", "ai", "dcc", "3d"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -40,10 +40,12 @@ dev = [
 [project.scripts]
 houdini-mcp = "houdini_mcp.server_with_gui:main"
 houdini-mcp-daemon = "houdini_mcp.daemon_server:main"
+maya-mcp = "maya_mcp.server_with_gui:main"
+maya-mcp-daemon = "maya_mcp.daemon_server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["houdini_mcp*"]
+include = ["houdini_mcp*", "maya_mcp*"]
 
 [tool.black]
 line-length = 100
