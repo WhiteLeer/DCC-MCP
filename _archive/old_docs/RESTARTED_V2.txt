@@ -1,0 +1,53 @@
+✅ Houdini MCP已切换到v2进程隔离架构！
+
+=== 下一步 ===
+
+1. 重启Claude Code
+   - 关闭当前会话
+   - 重新打开Claude Code
+   - MCP会自动加载新的server.py (v2)
+
+2. 验证v2已生效
+   - 看到启动日志: "🚀 Houdini MCP Server v2 - Process-Isolated Architecture"
+   - 日志位置: C:\Users\wepie\.mcp_logs\houdini-mcp-v2\
+
+3. 测试超时保护
+   - 尝试之前卡住的操作（polyreduce）
+   - 应该在30秒后自动返回超时错误
+   - 不会再卡住！
+
+=== v2核心特性 ===
+
+✅ 真正的超时保护（进程级kill）
+✅ 操作隔离（每个操作独立进程）
+✅ 详细日志（文件+控制台）
+✅ 可配置超时（每个工具不同）
+✅ 生产级稳定性
+
+=== 超时设置 ===
+
+- get_scene_state: 10秒
+- create_box: 15秒
+- polyreduce: 30秒
+- mirror: 30秒
+- delete_half: 20秒
+- boolean: 45秒
+- import_geometry: 60秒
+
+=== 文档 ===
+
+- SWITCH_TO_V2.md - 详细切换指南
+- PRODUCTION_FEATURES.md - 功能说明
+
+=== 回滚到v1 ===
+
+如果有问题（不太可能）：
+
+cd C:/Users/wepie/houdini-mcp/houdini_mcp
+cp server_v1_backup.py server.py
+
+然后重启Claude Code
+
+===========================
+
+现在重启Claude Code即可使用v2！🚀

@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "houdini-mcp"
+version = "0.1.0"
+description = "Model Context Protocol server for Houdini SOP operations"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    {name = "WhiteLeer", email = "master@example.com"}
+]
+license = {text = "MIT"}
+keywords = ["houdini", "mcp", "ai", "dcc", "3d"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "mcp>=1.26.0",
+    "dcc-mcp-core>=0.8.0",
+    "pydantic>=2.0.0",
+    "loguru>=0.7.0",
+    "psutil>=5.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+houdini-mcp = "houdini_mcp.server_with_gui:main"
+houdini-mcp-daemon = "houdini_mcp.daemon_server:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["houdini_mcp*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

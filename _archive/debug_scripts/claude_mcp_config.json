@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "houdini": {
+      "command": "C:/Program Files/Side Effects Software/Houdini 20.5.487/bin/hython.exe",
+      "args": [
+        "-m",
+        "houdini_mcp.server"
+      ],
+      "env": {
+        "HOUDINI_PATH": "C:/Program Files/Side Effects Software/Houdini 20.5.487/bin",
+        "PYTHONPATH": "C:/Users/wepie/houdini-mcp"
+      }
+    }
+  }
+}

@@ -1,0 +1,198 @@
+Metadata-Version: 2.4
+Name: houdini-mcp
+Version: 0.1.0
+Summary: Model Context Protocol server for Houdini SOP operations
+Author-email: WhiteLeer <master@example.com>
+License: MIT
+Keywords: houdini,mcp,ai,dcc,3d
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.11
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: mcp>=1.26.0
+Requires-Dist: dcc-mcp-core>=0.8.0
+Requires-Dist: pydantic>=2.0.0
+Requires-Dist: loguru>=0.7.0
+Requires-Dist: psutil>=5.9.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+
+# Houdini MCP Server
+
+AI-powered Houdini control via Model Context Protocol (MCP).
+
+## Features
+
+- 🎨 **SOP Operations**: Create geometry, polyreduce, and more
+- 🤖 **AI Integration**: Direct control from Claude Code/Desktop
+- 🔧 **Type-Safe Actions**: Pydantic-validated parameters
+- 📊 **Scene State**: Query current Houdini scene information
+- 🚀 **Extensible**: Easy to add new actions
+
+## Installation
+
+### 1. Install Dependencies
+
+```bash
+pip install mcp dcc-mcp-core
+```
+
+### 2. Install Houdini MCP
+
+```bash
+cd C:/Users/wepie/houdini-mcp
+pip install -e .
+```
+
+### 3. Configure Houdini Path
+
+Set environment variable (optional, auto-detects by default):
+
+```bash
+set HOUDINI_PATH=C:\Program Files\Side Effects Software\Houdini 20.5.487\bin
+```
+
+## Usage
+
+### Standalone Mode
+
+```bash
+python -m houdini_mcp.server --houdini-path "C:\Program Files\Side Effects Software\Houdini 20.5.487\bin"
+```
+
+### Claude Code Integration
+
+Add to Claude Code MCP configuration:
+
+**Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "houdini": {
+      "command": "C:/Program Files/Python311/python.exe",
+      "args": [
+        "-m",
+        "houdini_mcp.server",
+        "--houdini-path",
+        "C:/Program Files/Side Effects Software/Houdini 20.5.487/bin"
+      ],
+      "env": {
+        "HOUDINI_PATH": "C:/Program Files/Side Effects Software/Houdini 20.5.487/bin"
+      }
+    }
+  }
+}
+```
+
+## Available Tools
+
+### `list_actions`
+List all available Houdini actions.
+
+### `create_box`
+Create a box geometry node.
+
+**Parameters**:
+- `node_name` (str): Name for the box node
+- `size_x`, `size_y`, `size_z` (float): Box dimensions
+
+**Example**:
+```python
+result = create_box(node_name="my_box", size_x=2.0, size_y=2.0, size_z=2.0)
+```
+
+### `polyreduce`
+Reduce polygon count of a geometry node.
+
+**Parameters**:
+- `geo_path` (str): Path to geometry node (e.g., "/obj/geo1")
+- `target_percent` (float): Target percentage (0.1-100)
+- `output_name` (str): Name for polyreduce node
+
+**Example**:
+```python
+result = polyreduce(geo_path="/obj/box", target_percent=25.0)
+```
+
+### `get_scene_state`
+Get current Houdini scene state.
+
+**Returns**:
+- Current frame
+- List of nodes in /obj
+- HIP file path
+
+## Architecture
+
+```
+Claude/AI
+    ↓ (MCP Protocol - Stdio)
+FastMCP Server (houdini_mcp.server)
+    ↓ (Action Manager)
+Action Classes (Pydantic)
+    ↓ (Houdini Adapter)
+Houdini hou API
+```
+
+## Adding New Actions
+
+1. Create action class in `houdini_mcp/actions/sop/`:
+
+```python
+from dcc_mcp_core.actions.base import Action
+from pydantic import Field
+
+class MyAction(Action):
+    name = "my_action"
+    description = "Description of my action"
+    tags = ["sop", "custom"]
+    dcc = "houdini"
+
+    class InputModel(Action.InputModel):
+        param1: str = Field(description="Parameter 1")
+
+    class OutputModel(Action.OutputModel):
+        result: str = Field(description="Result")
+
+    def _execute(self):
+        hou = self.context.get("hou")
+        # Your logic here
+        self.output = self.OutputModel(result="Success")
+```
+
+2. Action will be auto-discovered by ActionManager
+
+3. Optionally add a dedicated MCP tool in `server.py`
+
+## Project Structure
+
+```
+houdini-mcp/
+├── houdini_mcp/
+│   ├── __init__.py
+│   ├── server.py              # MCP Server
+│   ├── adapter/
+│   │   └── houdini_adapter.py # Houdini initialization
+│   └── actions/
+│       └── sop/
+│           ├── create_box.py  # CreateBox action
+│           └── polyreduce.py  # PolyReduce action
+├── pyproject.toml
+└── README.md
+```
+
+## License
+
+MIT
+
+## Credits
+
+- Built with [dcc-mcp-core](https://github.com/loonghao/dcc-mcp-core)
+- Inspired by [mcp-blender-bridge](https://github.com/sebschopf/mcp-blender-bridge)
