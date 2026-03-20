@@ -31,6 +31,7 @@ def main(dcc: str = "houdini"):
         supports_restart=config.supports_restart,
         port_range=config.port_range,
         strict_state=config.strict_state,
+        ensure_daemon_func=config.ensure_daemon,
     )
     window.show()
 

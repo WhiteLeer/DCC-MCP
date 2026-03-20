@@ -42,6 +42,7 @@ class MainWindow(QMainWindow):
         supports_restart: bool = True,
         port_range: tuple[int, int] = (9876, 9885),
         strict_state: bool = True,
+        ensure_daemon_func=None,
     ):
         super().__init__()
 
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         self._supports_restart = supports_restart
         self._port_range = port_range
         self._strict_state = strict_state
+        self._ensure_daemon_func = ensure_daemon_func
 
         self._init_ui()
         self._connect_signals()
@@ -66,6 +68,11 @@ class MainWindow(QMainWindow):
         self.process_count_timer = QTimer()
         self.process_count_timer.timeout.connect(self._request_process_count)
         self.process_count_timer.start(3000)
+
+        # Periodic status update (every 1 second) for uptime/node refresh
+        self.status_timer = QTimer()
+        self.status_timer.timeout.connect(self._request_status)
+        self.status_timer.start(1000)
 
     def _init_ui(self):
         """Initialize UI components."""
@@ -137,21 +144,10 @@ class MainWindow(QMainWindow):
         self.cleanup_btn.clicked.connect(self._on_cleanup_clicked)
         layout.addWidget(self.cleanup_btn)
 
-        self.restart_btn = QPushButton(f"🔄 重启 {self.dcc_name}")
-        self.restart_btn.setEnabled(False)
-        self.restart_btn.clicked.connect(self._on_restart_clicked)
-        if self._supports_restart:
-            layout.addWidget(self.restart_btn)
-
         self.restart_mcp_btn = QPushButton("🔄 重启 MCP 服务器")
         self.restart_mcp_btn.setEnabled(False)
         self.restart_mcp_btn.clicked.connect(self._on_restart_mcp_clicked)
         layout.addWidget(self.restart_mcp_btn)
-
-        self.stop_btn = QPushButton("⏸️ 停止服务器")
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self._on_stop_clicked)
-        layout.addWidget(self.stop_btn)
 
         return layout
 
@@ -289,6 +285,12 @@ class MainWindow(QMainWindow):
     async def _ws_connect_async(self):
         """Async WebSocket connection."""
         try:
+            if self._ensure_daemon_func:
+                try:
+                    self._ensure_daemon_func()
+                except Exception:
+                    pass
+
             last_error = None
             for url in self._candidate_ws_urls():
                 try:
@@ -306,9 +308,7 @@ class MainWindow(QMainWindow):
             # Update UI
             self.connection_status.setText("● 已连接")
             self.connection_status.setStyleSheet("color: #2ecc71; font-weight: bold;")
-            self.restart_btn.setEnabled(True)
             self.restart_mcp_btn.setEnabled(True)
-            self.stop_btn.setEnabled(True)
             self.status_bar.showMessage(f"已连接到 MCP 服务器 ({self.ws_url})", 3000)
             self.logs.load_recent_logs()
             self.logs.add_log(
@@ -376,9 +376,7 @@ class MainWindow(QMainWindow):
             self.connected = False
             self.connection_status.setText("● 未连接")
             self.connection_status.setStyleSheet("color: #e74c3c; font-weight: bold;")
-            self.restart_btn.setEnabled(False)
             self.restart_mcp_btn.setEnabled(False)
-            self.stop_btn.setEnabled(False)
             self.process_count_label.setText("后台/执行进程: --")
             self.status_bar.showMessage("与 MCP 服务器断开连接")
             self.logs.add_log(
@@ -463,12 +461,26 @@ class MainWindow(QMainWindow):
         if self.connected:
             asyncio.create_task(self._send_command("get_process_count", {}))
 
+    def _request_status(self):
+        """Periodically request server status."""
+        if self.connected:
+            asyncio.create_task(self._send_command("get_status", {}))
+
     def _on_cleanup_clicked(self):
         """Handle cleanup old processes button click."""
+        process_hint = {
+            "houdini": "hython",
+            "maya": "mayapy",
+            "blender": "blender",
+            "substance": "substance/python",
+        }.get(self.dcc_name.lower().split()[0], self.dcc_name)
+
         reply = QMessageBox.question(
             self,
             "清理旧进程",
-            "强制终止所有 hython.exe 进程？\n\n这会清理可能卡住的后台服务或执行进程。\n当前连接会短暂断开，随后可重新连接。",
+            f"强制清理 {self.dcc_name} 相关旧进程？\n\n"
+            f"目标: {process_hint}\n"
+            "这会清理可能卡住的后台服务或执行进程，当前连接会短暂断开。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
@@ -476,19 +488,57 @@ class MainWindow(QMainWindow):
             asyncio.create_task(self._cleanup_old_processes())
 
     async def _cleanup_old_processes(self):
-        """Cleanup old hython processes."""
+        """Cleanup old DCC-related processes."""
         try:
             import psutil
             import os
+            import json
 
             current_pid = os.getpid()
             killed_count = 0
+            target_pids = set()
+
+            # 1) 优先清理当前 DCC 状态目录中的 daemon PID
+            try:
+                state_dir = self._state_dir_func()
+                for path in Path(state_dir).glob("ws_port*.json"):
+                    try:
+                        data = json.loads(path.read_text(encoding="utf-8"))
+                        pid = int(data.get("pid", 0))
+                        if pid > 0 and pid != current_pid and psutil.pid_exists(pid):
+                            target_pids.add(pid)
+                    except Exception:
+                        continue
+            except Exception:
+                pass
+
+            # 2) 根据 DCC 类型清理明显卡住的执行进程
+            markers = []
+            dcc_lower = self.dcc_name.lower()
+            if "houdini" in dcc_lower:
+                markers = ["hython", "houdini_mcp"]
+            elif "maya" in dcc_lower:
+                markers = ["mayapy", "maya_mcp"]
+            elif "blender" in dcc_lower:
+                markers = ["blender", "blender_mcp"]
+            elif "substance" in dcc_lower:
+                markers = ["substance_mcp", "substance-designer"]
 
             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                 try:
-                    if proc.info['name'] and 'hython' in proc.info['name'].lower():
-                        proc.kill()
-                        killed_count += 1
+                    if proc.pid == current_pid:
+                        continue
+                    name = (proc.info.get('name') or '').lower()
+                    cmdline = " ".join(proc.info.get('cmdline') or []).lower()
+                    if any(m in name or m in cmdline for m in markers):
+                        target_pids.add(proc.pid)
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            for pid in list(target_pids):
+                try:
+                    psutil.Process(pid).kill()
+                    killed_count += 1
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
 
@@ -497,7 +547,7 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(
                     self,
                     "清理完成",
-                    f"已终止 {killed_count} 个 hython 进程。\n\n如果需要重新连接，请重新启动后台服务或 Codex 中的 MCP。"
+                    f"已终止 {killed_count} 个 {self.dcc_name} 相关进程。\n\n如需重连，稍等几秒后会自动恢复。"
                 )
             else:
                 self.status_bar.showMessage("没有找到需要清理的旧进程", 3000)
@@ -507,44 +557,18 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "清理失败", f"清理进程失败:\n{e}")
             self.status_bar.showMessage(f"清理失败: {e}")
 
-    def _on_restart_clicked(self):
-        """Handle restart Houdini button click."""
-        if not self._supports_restart:
-            return
-        reply = QMessageBox.question(
-            self,
-            f"重启 {self.dcc_name}",
-            f"重启 {self.dcc_name} 连接？这不会重启 MCP 服务器。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
-            asyncio.create_task(self._send_command("restart_houdini", {}))
-
     def _on_restart_mcp_clicked(self):
         """Handle restart MCP server button click."""
         reply = QMessageBox.question(
             self,
             "重启 MCP 服务器",
-            "重启 Houdini 后台服务？\n\n后台服务会自重启，这会应用服务端代码修改。",
+            f"重启 {self.dcc_name} 后台服务？\n\n后台服务会自重启，这会应用服务端代码修改。",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             asyncio.create_task(self._send_command("restart_mcp_server", {}))
             self.status_bar.showMessage("正在重启 MCP 服务器...")
-
-    def _on_stop_clicked(self):
-        """Handle stop button click."""
-        reply = QMessageBox.question(
-            self,
-            "停止服务器",
-            "停止 Houdini 后台服务？GUI 和 Codex 都会暂时失去连接。",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-
-        if reply == QMessageBox.StandardButton.Yes:
-            asyncio.create_task(self._send_command("shutdown", {}))
 
     def closeEvent(self, event):
         """Handle window close."""

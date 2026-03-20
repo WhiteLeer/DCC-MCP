@@ -116,6 +116,12 @@ class MayaDaemon:
     async def _send_status(self, websocket: WebSocketServerProtocol) -> None:
         scene_state = self.session.get_scene_state()
         scene_data = scene_state.get("data", {}) if scene_state.get("success") else {}
+        scene_path = scene_data.get("scene_path")
+        if scene_path and isinstance(scene_path, str) and scene_path.lower() not in {"untitled", "unsaved"}:
+            try:
+                scene_path = os.path.abspath(scene_path)
+            except Exception:
+                pass
         await websocket.send(
             status_update(
                 server_running=True,
@@ -124,7 +130,7 @@ class MayaDaemon:
                 houdini_pid=os.getpid(),
                 backend_pid=os.getpid(),
                 scene_node_count=scene_data.get("node_count"),
-                hip_file=scene_data.get("scene_path"),
+                hip_file=scene_path,
             ).to_json()
         )
 

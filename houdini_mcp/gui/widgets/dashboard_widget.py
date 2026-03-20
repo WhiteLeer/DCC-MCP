@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QGroupBox, QFrame
+    QLabel, QGroupBox, QFrame, QSizePolicy
 )
 from PyQt6.QtGui import QFont
 from datetime import timedelta
@@ -38,6 +38,8 @@ class StatusCard(QFrame):
         value_font.setBold(True)
         self.value_label.setFont(value_font)
         self.value_label.setStyleSheet("color: #17202a;")
+        self.value_label.setWordWrap(True)
+        self.value_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.value_label)
 
     def set_value(self, value: str):
@@ -76,7 +78,7 @@ class DashboardWidget(QWidget):
         self.server_status_card.value_label.setStyleSheet("color: #2ecc71;")
         cards_layout.addWidget(self.server_status_card, 0, 0)
 
-        self.uptime_card = StatusCard("运行时间", "00:00:00")
+        self.uptime_card = StatusCard("服务运行时间", "00:00:00")
         cards_layout.addWidget(self.uptime_card, 0, 1)
 
         self.houdini_status_card = StatusCard("会话节点", "检查中...")
@@ -90,6 +92,9 @@ class DashboardWidget(QWidget):
 
         self.hip_card = StatusCard("场景文件", "—")
         cards_layout.addWidget(self.hip_card, 1, 2)
+        cards_layout.setColumnStretch(0, 1)
+        cards_layout.setColumnStretch(1, 1)
+        cards_layout.setColumnStretch(2, 1)
 
         layout.addLayout(cards_layout)
 
@@ -99,6 +104,8 @@ class DashboardWidget(QWidget):
 
         self.claude_status = QLabel("后台服务: 检查中...")
         self.houdini_detail = QLabel(f"{self.dcc_name} 会话: 检查中...")
+        self.claude_status.setWordWrap(True)
+        self.houdini_detail.setWordWrap(True)
 
         connection_layout.addWidget(self.claude_status)
         connection_layout.addWidget(self.houdini_detail)
@@ -111,6 +118,8 @@ class DashboardWidget(QWidget):
         path_layout = QVBoxLayout()
         self.state_dir_label = QLabel("状态目录: —")
         self.log_dir_label = QLabel("日志目录: —")
+        self.state_dir_label.setWordWrap(True)
+        self.log_dir_label.setWordWrap(True)
         path_layout.addWidget(self.state_dir_label)
         path_layout.addWidget(self.log_dir_label)
         path_group.setLayout(path_layout)
@@ -141,10 +150,12 @@ class DashboardWidget(QWidget):
             self.houdini_status_card.value_label.setStyleSheet("color: #2ecc71;")
             if hip_file:
                 self.houdini_detail.setText(f"{self.dcc_name} 会话: ✓ 已加载 ({hip_file})")
-                self.hip_card.set_value(self._short_path(hip_file))
+                self.hip_card.set_value(hip_file)
+                self.hip_card.value_label.setToolTip(hip_file)
             else:
                 self.houdini_detail.setText(f"{self.dcc_name} 会话: ✓ 已连接")
                 self.hip_card.set_value("—")
+                self.hip_card.value_label.setToolTip("")
             self.houdini_detail.setStyleSheet("color: #2ecc71;")
         else:
             self.houdini_status_card.set_value("✗ 未找到")
@@ -152,6 +163,7 @@ class DashboardWidget(QWidget):
             self.houdini_detail.setText(f"{self.dcc_name} 会话: ✗ 未运行")
             self.houdini_detail.setStyleSheet("color: #e74c3c;")
             self.hip_card.set_value("—")
+            self.hip_card.value_label.setToolTip("")
 
         # Backend service (assume connected if we're getting status)
         if backend_pid:
@@ -167,7 +179,8 @@ class DashboardWidget(QWidget):
         return
 
     def set_connection_info(self, ws_url: str, state_dir: str, log_dir: str):
-        self.ws_card.set_value(ws_url)
+        self.ws_card.set_value(self._short_path(ws_url))
+        self.ws_card.value_label.setToolTip(ws_url)
         self.state_dir_label.setText(f"状态目录: {state_dir}")
         self.log_dir_label.setText(f"日志目录: {log_dir}")
 

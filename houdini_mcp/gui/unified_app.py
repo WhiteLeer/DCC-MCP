@@ -71,6 +71,7 @@ class UnifiedControlPanel(QMainWindow):
             supports_restart=cfg.supports_restart,
             port_range=cfg.port_range,
             strict_state=cfg.strict_state,
+            ensure_daemon_func=cfg.ensure_daemon,
         )
         self.child_panels.append(panel)
 
@@ -93,6 +94,9 @@ def main() -> None:
     asyncio.set_event_loop(loop)
 
     window = UnifiedControlPanel()
+    screen_geo = app.primaryScreen().availableGeometry()
+    window.setFixedSize(screen_geo.width(), screen_geo.height())
+    window.move(screen_geo.left(), screen_geo.top())
     window.show()
 
     with loop:
