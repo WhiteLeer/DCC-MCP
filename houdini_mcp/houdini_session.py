@@ -60,10 +60,14 @@ class HoudiniSessionBackend:
             return self.delete_half(params)
         if operation == "polyreduce":
             return self.polyreduce(params)
+        if operation == "smooth":
+            return self.smooth(params)
         if operation == "boolean":
             return self.boolean(params)
         if operation == "import_geometry":
             return self.import_geometry(params)
+        if operation == "export_geometry":
+            return self.export_geometry(params)
 
         return {"success": False, "error": f"Unknown operation: {operation}", "error_type": "UnknownOperation"}
 
@@ -613,6 +617,39 @@ class HoudiniSessionBackend:
             "context": data,
         }
 
+    def smooth(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        geo_path = params["geo_path"]
+        output_name = params.get("output_name", "smooth1")
+        strength = float(params.get("strength", 0.5))
+        strength = max(0.0, min(1.0, strength))
+
+        geo_node, display_node = self._resolve_display_node(geo_path)
+        smooth = geo_node.createNode("smooth", output_name)
+        smooth.setInput(0, display_node)
+        if smooth.parm("strength"):
+            smooth.parm("strength").set(strength)
+        smooth.setDisplayFlag(True)
+        smooth.setRenderFlag(True)
+        geo_node.layoutChildren()
+        smooth.cook(force=True)
+
+        result_geo = smooth.geometry()
+        poly_count, point_count = self._geometry_counts(result_geo)
+        data = {
+            "node_path": smooth.path(),
+            "strength": strength,
+            "poly_count": poly_count,
+            "point_count": point_count,
+            "message": f"Smoothed geometry with strength {strength:.2f}",
+        }
+        return {
+            "success": True,
+            "message": data["message"],
+            "prompt": f"Smooth completed: {data['message']}. Node: {data['node_path']}",
+            "error": None,
+            "context": data,
+        }
+
     def boolean(self, params: Dict[str, Any]) -> Dict[str, Any]:
         geo_path_a = params["geo_path_a"]
         geo_path_b = params.get("geo_path_b", "")
@@ -700,6 +737,44 @@ class HoudiniSessionBackend:
             "success": True,
             "message": data["message"],
             "prompt": f"Import completed: {data['message']}. Node: {data['node_path']}",
+            "error": None,
+            "context": data,
+        }
+
+    def export_geometry(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        geo_path = params["geo_path"]
+        output_path = params["output_path"]
+        file_type = params.get("file_type", "").lower().strip()
+
+        output_ext = os.path.splitext(output_path)[1].lower()
+        if not file_type:
+            file_type = output_ext.lstrip(".")
+        if file_type != "fbx":
+            raise RuntimeError(f"Only fbx export is currently supported, got: {file_type}")
+
+        geo_node, display_node = self._resolve_display_node(geo_path)
+        export_node = geo_node.createNode("rop_fbx", "export_fbx1")
+        export_node.parm("startnode").set(display_node.path())
+        export_node.parm("sopoutput").set(output_path)
+        if export_node.parm("vcformat"):
+            export_node.parm("vcformat").set(1)
+        geo_node.layoutChildren()
+        export_node.parm("execute").pressButton()
+
+        if not os.path.exists(output_path):
+            raise RuntimeError(f"Export failed, output file not found: {output_path}")
+
+        data = {
+            "node_path": export_node.path(),
+            "geo_path": display_node.path(),
+            "output_path": output_path,
+            "file_type": file_type,
+            "message": f"Exported geometry to {output_path}",
+        }
+        return {
+            "success": True,
+            "message": data["message"],
+            "prompt": f"Export completed: {data['message']}",
             "error": None,
             "context": data,
         }

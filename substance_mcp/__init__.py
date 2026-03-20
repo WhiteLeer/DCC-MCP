@@ -1,0 +1,2 @@
+"""Substance Designer MCP package."""
+

@@ -1,0 +1,10 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Local generated assets
+hda_outputs/
+substance_mcp/outputs/
+
+# Local runtime state
+*.log
