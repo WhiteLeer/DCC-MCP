@@ -143,6 +143,12 @@ class HoudiniDaemon:
         status = self.connection_manager.get_status()
         scene_state = self.session.get_scene_state()
         scene_data = scene_state.get("data", {}) if scene_state.get("success") else {}
+        hip_file = scene_data.get("hip_file")
+        if hip_file and isinstance(hip_file, str) and hip_file.lower() not in {"untitled", "unsaved"}:
+            try:
+                hip_file = os.path.abspath(hip_file)
+            except Exception:
+                pass
         await websocket.send(
             status_update(
                 server_running=True,
@@ -151,7 +157,7 @@ class HoudiniDaemon:
                 houdini_pid=status["pid"],
                 backend_pid=os.getpid(),
                 scene_node_count=scene_data.get("node_count"),
-                hip_file=scene_data.get("hip_file"),
+                hip_file=hip_file,
             ).to_json()
         )
 

@@ -48,6 +48,8 @@ class BlenderDaemon:
         self.clients: Set[WebSocketServerProtocol] = set()
         self.server: Optional[websockets.WebSocketServer] = None
         self.start_time = time.time()
+        self.last_scene_path = "untitled"
+        self.last_scene_node_count = None
 
     async def start(self) -> None:
         original_port = self.port
@@ -118,8 +120,8 @@ class BlenderDaemon:
                 houdini_connected=True,
                 houdini_pid=os.getpid(),
                 backend_pid=os.getpid(),
-                scene_node_count=None,
-                hip_file="blender-background",
+                scene_node_count=self.last_scene_node_count,
+                hip_file=self.last_scene_path,
             ).to_json()
         )
 
@@ -154,6 +156,23 @@ class BlenderDaemon:
         except Exception as e:
             result = {"success": False, "error": str(e), "error_type": type(e).__name__}
         duration = time.time() - start_time
+
+        if result.get("success"):
+            context = result.get("context") or result.get("data") or {}
+            for key in ("output_blend", "input_blend", "output_path", "input_path", "scene_path"):
+                value = context.get(key)
+                if value and isinstance(value, str):
+                    try:
+                        self.last_scene_path = os.path.abspath(value)
+                    except Exception:
+                        self.last_scene_path = value
+                    break
+
+            node_count = context.get("object_count")
+            if node_count is None:
+                node_count = context.get("mesh_count")
+            if isinstance(node_count, int):
+                self.last_scene_node_count = node_count
 
         await websocket.send(WSMessage(MessageType.TOOL_RESULT, result, request_id=message.request_id).to_json())
 
