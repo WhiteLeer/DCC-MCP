@@ -82,15 +82,18 @@ def get_dcc_config(dcc_key: str) -> DccConfig:
         )
 
     if key in {"substance", "substance-designer", "substance_designer"}:
+        from substance_mcp.daemon_launcher import ensure_daemon_running
+        from substance_mcp.utils.state_paths import get_state_dir as substance_state_dir
+
         return DccConfig(
             key="substance-designer",
             display_name="Substance Designer",
-            state_dir_func=lambda: _generic_state_dir("substance-designer"),
+            state_dir_func=substance_state_dir,
             log_dir_prefix="substance-designer-mcp",
             supports_restart=False,
             port_range=(9920, 9929),
             strict_state=True,
-            ensure_daemon=None,
+            ensure_daemon=ensure_daemon_running,
         )
 
         return DccConfig(

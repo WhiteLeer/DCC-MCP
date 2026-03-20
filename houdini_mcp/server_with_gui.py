@@ -200,6 +200,21 @@ def create_server(name: str = "Houdini-Bridge") -> FastMCP:
         )
 
     @mcp.tool()
+    async def smooth(
+        geo_path: str,
+        strength: float = 0.5,
+        output_name: str = "smooth1",
+    ) -> dict:
+        return await invoke_operation(
+            "smooth",
+            {
+                "geo_path": geo_path,
+                "strength": strength,
+                "output_name": output_name,
+            },
+        )
+
+    @mcp.tool()
     async def mirror(
         geo_path: str,
         axis: str = "x",
@@ -262,6 +277,21 @@ def create_server(name: str = "Houdini-Bridge") -> FastMCP:
             {
                 "file_path": file_path,
                 "node_name": node_name,
+            },
+        )
+
+    @mcp.tool()
+    async def export_geometry(
+        geo_path: str,
+        output_path: str,
+        file_type: str = "fbx",
+    ) -> dict:
+        return await invoke_operation(
+            "export_geometry",
+            {
+                "geo_path": geo_path,
+                "output_path": output_path,
+                "file_type": file_type,
             },
         )
 
