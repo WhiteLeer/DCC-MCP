@@ -12,7 +12,7 @@ authors = [
     {name = "WhiteLeer", email = "master@example.com"}
 ]
 license = {text = "MIT"}
-keywords = ["houdini", "maya", "substance-designer", "mcp", "ai", "dcc", "3d"]
+keywords = ["houdini", "maya", "blender", "substance-designer", "mcp", "ai", "dcc", "3d"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -44,12 +44,14 @@ houdini-mcp = "houdini_mcp.server_with_gui:main"
 houdini-mcp-daemon = "houdini_mcp.daemon_server:main"
 maya-mcp = "maya_mcp.server_with_gui:main"
 maya-mcp-daemon = "maya_mcp.daemon_server:main"
+blender-mcp = "blender_mcp.server_with_gui:main"
+blender-mcp-daemon = "blender_mcp.daemon_server:main"
 substance-designer-mcp = "substance_mcp.server_with_gui:main"
 substance-designer-mcp-daemon = "substance_mcp.daemon_server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["houdini_mcp*", "maya_mcp*", "substance_mcp*"]
+include = ["houdini_mcp*", "maya_mcp*", "blender_mcp*", "substance_mcp*"]
 
 [tool.black]
 line-length = 100
