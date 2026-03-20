@@ -2,6 +2,16 @@
 
 The GUI now connects to the persistent Houdini daemon, not to the short-lived `Codex` MCP subprocess.
 
+## Unified Panel
+
+You can now launch a unified panel for all DCCs (Houdini / Maya / Blender / Substance Designer):
+
+```powershell
+python run_unified_gui.py
+```
+
+or use desktop shortcut `DCC_MCP_Control.lnk`.
+
 ## Connection model
 
 ```text
