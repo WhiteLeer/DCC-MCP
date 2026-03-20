@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from blender_mcp.utils.state_paths import get_state_dir as blender_state_dir
 from houdini_mcp.utils.state_paths import get_state_dir as houdini_state_dir
 from maya_mcp.utils.state_paths import get_state_dir as maya_state_dir
 
@@ -70,15 +71,17 @@ def get_dcc_config(dcc_key: str) -> DccConfig:
         )
 
     if key == "blender":
+        from blender_mcp.daemon_launcher import ensure_daemon_running
+
         return DccConfig(
             key="blender",
             display_name="Blender",
-            state_dir_func=lambda: _generic_state_dir("blender"),
+            state_dir_func=blender_state_dir,
             log_dir_prefix="blender-mcp",
             supports_restart=False,
             port_range=(9910, 9919),
             strict_state=True,
-            ensure_daemon=None,
+            ensure_daemon=ensure_daemon_running,
         )
 
     if key in {"substance", "substance-designer", "substance_designer"}:
