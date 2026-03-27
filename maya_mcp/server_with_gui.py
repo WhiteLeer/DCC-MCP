@@ -143,6 +143,18 @@ def create_server(name: str = "Maya-Bridge") -> FastMCP:
         )
 
     @mcp.tool()
+    async def capture_screenshot(
+        output_path: str,
+        camera: str = "persp",
+        width: int = 1024,
+        height: int = 1024,
+    ) -> dict:
+        return await invoke_operation(
+            "capture_screenshot",
+            {"output_path": output_path, "camera": camera, "width": width, "height": height},
+        )
+
+    @mcp.tool()
     async def workflow_run(
         steps: list[dict],
         stop_on_error: bool = True,

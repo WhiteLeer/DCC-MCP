@@ -304,6 +304,18 @@ def create_server(name: str = "Houdini-Bridge") -> FastMCP:
         )
 
     @mcp.tool()
+    async def capture_screenshot(
+        output_path: str,
+        camera_path: str = "",
+        width: int = 1024,
+        height: int = 1024,
+    ) -> dict:
+        return await invoke_operation(
+            "capture_screenshot",
+            {"output_path": output_path, "camera_path": camera_path, "width": width, "height": height},
+        )
+
+    @mcp.tool()
     async def export_geometry(
         geo_path: str,
         output_path: str,

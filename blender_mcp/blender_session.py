@@ -40,6 +40,8 @@ class BlenderSessionBackend:
             return self.shade_smooth(params)
         if operation == "merge_by_distance":
             return self.merge_by_distance(params)
+        if operation == "capture_screenshot":
+            return self.capture_screenshot(params)
 
         return {"success": False, "error": f"Unknown operation: {operation}", "error_type": "UnknownOperation"}
 
@@ -490,4 +492,41 @@ _ok({{"input_blend": r\"{input_blend}\", "output_blend": out_path, "mesh_count":
             return result
         data = result["data"]
         message = f"Merged vertices by distance on {data.get('mesh_count', 0)} mesh(es)"
+        return {"success": True, "message": message, "prompt": message, "error": None, "context": data}
+
+    def capture_screenshot(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        output_path = str(params.get("output_path", "")).strip()
+        if not output_path:
+            raise RuntimeError("output_path is required")
+        input_blend = str(params.get("input_blend", "")).strip()
+        width = max(64, int(params.get("width", 1024)))
+        height = max(64, int(params.get("height", 1024)))
+
+        open_stmt = f'bpy.ops.wm.open_mainfile(filepath=r"{input_blend}")' if input_blend else ""
+        script = f"""
+import bpy
+{open_stmt}
+
+scene = bpy.context.scene
+scene.render.engine = 'BLENDER_WORKBENCH'
+scene.render.resolution_x = {width}
+scene.render.resolution_y = {height}
+scene.render.resolution_percentage = 100
+scene.render.filepath = r"{output_path}"
+
+if scene.camera is None:
+    bpy.ops.object.camera_add(location=(3.0, -3.0, 2.0), rotation=(1.1, 0.0, 0.8))
+    scene.camera = bpy.context.active_object
+
+if not bpy.data.lights:
+    bpy.ops.object.light_add(type='SUN', location=(5.0, -5.0, 8.0))
+
+bpy.ops.render.render(write_still=True)
+_ok({{"output_path": r"{output_path}", "width": {width}, "height": {height}, "input_blend": r"{input_blend}"}})
+"""
+        result = self._run_blender_script(script, timeout_seconds=180)
+        if not result.get("success"):
+            return result
+        data = result["data"]
+        message = f"Captured Blender screenshot: {Path(output_path).name}"
         return {"success": True, "message": message, "prompt": message, "error": None, "context": data}

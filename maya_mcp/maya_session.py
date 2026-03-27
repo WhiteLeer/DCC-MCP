@@ -62,6 +62,8 @@ class MayaSessionBackend:
             return self.import_geometry(params)
         if operation == "import_model":
             return self.import_model(params)
+        if operation == "capture_screenshot":
+            return self.capture_screenshot(params)
 
         return {"success": False, "error": f"Unknown operation: {operation}", "error_type": "UnknownOperation"}
 
@@ -419,6 +421,51 @@ class MayaSessionBackend:
         except Exception:
             # Keep import attempt behavior unchanged when plugin probing is unsupported.
             pass
+
+    def capture_screenshot(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        output_path = str(params.get("output_path", "")).strip()
+        if not output_path:
+            raise RuntimeError("output_path is required")
+
+        camera = str(params.get("camera", "persp")).strip() or "persp"
+        width = max(64, int(params.get("width", 1024)))
+        height = max(64, int(params.get("height", 1024)))
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        err1 = ""
+        err2 = ""
+        try:
+            rendered = self.cmds.ogsRender(camera=camera, currentFrame=True, width=width, height=height)
+            if rendered and Path(str(rendered)).exists():
+                src = Path(str(rendered))
+                dst = Path(output_path)
+                if src.resolve() != dst.resolve():
+                    import shutil
+                    shutil.copy2(src, dst)
+        except Exception as e:
+            err1 = str(e)
+
+        if not Path(output_path).exists():
+            try:
+                self.cmds.playblast(
+                    frame=self.cmds.currentTime(query=True),
+                    format="image",
+                    completeFilename=output_path,
+                    widthHeight=[width, height],
+                    percent=100,
+                    forceOverwrite=True,
+                    showOrnaments=False,
+                    viewer=False,
+                )
+            except Exception as e:
+                err2 = str(e)
+
+        if not Path(output_path).exists():
+            raise RuntimeError(f"Failed to capture Maya screenshot. ogsRender={err1 or 'n/a'}; playblast={err2 or 'n/a'}")
+
+        data = {"output_path": output_path, "camera": camera, "width": width, "height": height}
+        message = f"Captured Maya screenshot: {Path(output_path).name}"
+        return {"success": True, "message": message, "prompt": message, "error": None, "context": data}
 
     def _resolve_transform(self, node: str) -> str:
         if not node:

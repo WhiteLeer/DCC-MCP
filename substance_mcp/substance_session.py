@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 from PIL import ImageEnhance, ImageFilter
 import psutil
 
@@ -40,6 +40,8 @@ class SubstanceSessionBackend:
             return self.import_texture(params)
         if operation == "process_texture":
             return self.process_texture(params)
+        if operation == "capture_screenshot":
+            return self.capture_screenshot(params)
         if operation == "analyze_image_palette":
             return self.analyze_image_palette(params)
         if operation == "harmonize_image_color":
@@ -331,6 +333,57 @@ class SubstanceSessionBackend:
             "slope_blur_samples": slope_blur_samples,
             "slope_blur_blend": slope_blur_blend,
             "message": f"Processed texture to {out_path}",
+        }
+        return {
+            "success": True,
+            "message": data["message"],
+            "prompt": data["message"],
+            "error": None,
+            "context": data,
+        }
+
+    def capture_screenshot(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        input_path = self._require_existing_file(params.get("input_path", ""))
+        output_path = str(params.get("output_path", "")).strip()
+        if not output_path:
+            src = Path(input_path)
+            output_path = str(src.with_name(f"{src.stem}_preview{src.suffix}"))
+
+        compare_path = str(params.get("compare_path", "")).strip()
+        label_left = str(params.get("label_left", "Input")).strip() or "Input"
+        label_right = str(params.get("label_right", "Compare")).strip() or "Compare"
+        max_width = max(128, int(params.get("max_width", 1024)))
+        max_height = max(128, int(params.get("max_height", 1024)))
+
+        left = Image.open(input_path).convert("RGBA")
+        left.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+
+        if compare_path:
+            right_file = self._require_existing_file(compare_path)
+            right = Image.open(right_file).convert("RGBA")
+            right.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+            w = left.width + right.width + 24
+            h = max(left.height, right.height) + 56
+            canvas = Image.new("RGBA", (w, h), (24, 24, 24, 255))
+            canvas.paste(left, (8, 40))
+            canvas.paste(right, (left.width + 16, 40))
+            draw = ImageDraw.Draw(canvas)
+            draw.text((12, 12), label_left, fill=(220, 220, 220, 255))
+            draw.text((left.width + 20, 12), label_right, fill=(220, 220, 220, 255))
+            out = canvas
+        else:
+            out = left
+
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out.save(out_path)
+
+        data = {
+            "input_path": input_path,
+            "compare_path": compare_path,
+            "output_path": str(out_path),
+            "size": [out.width, out.height],
+            "message": f"Captured Substance preview: {out_path.name}",
         }
         return {
             "success": True,

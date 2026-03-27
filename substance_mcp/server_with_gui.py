@@ -131,6 +131,29 @@ def create_server(name: str = "Substance-Designer-Bridge") -> FastMCP:
         )
 
     @mcp.tool()
+    async def capture_screenshot(
+        input_path: str,
+        output_path: str = "",
+        compare_path: str = "",
+        label_left: str = "Input",
+        label_right: str = "Compare",
+        max_width: int = 1024,
+        max_height: int = 1024,
+    ) -> dict:
+        return await invoke_operation(
+            "capture_screenshot",
+            {
+                "input_path": input_path,
+                "output_path": output_path,
+                "compare_path": compare_path,
+                "label_left": label_left,
+                "label_right": label_right,
+                "max_width": max_width,
+                "max_height": max_height,
+            },
+        )
+
+    @mcp.tool()
     async def analyze_image_palette(input_path: str, top_k: int = 8) -> dict:
         return await invoke_operation(
             "analyze_image_palette",

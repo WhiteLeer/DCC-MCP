@@ -93,6 +93,18 @@ def create_server(name: str = "Blender-Bridge") -> FastMCP:
         )
 
     @mcp.tool()
+    async def capture_screenshot(
+        output_path: str,
+        input_blend: str = "",
+        width: int = 1024,
+        height: int = 1024,
+    ) -> dict:
+        return await invoke_operation(
+            "capture_screenshot",
+            {"output_path": output_path, "input_blend": input_blend, "width": width, "height": height},
+        )
+
+    @mcp.tool()
     async def decimate_mesh(
         input_blend: str = "",
         output_blend: str = "",

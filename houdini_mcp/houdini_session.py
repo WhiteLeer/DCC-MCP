@@ -68,6 +68,8 @@ class HoudiniSessionBackend:
             return self.import_geometry(params)
         if operation == "import_model":
             return self.import_model(params)
+        if operation == "capture_screenshot":
+            return self.capture_screenshot(params)
         if operation == "export_geometry":
             return self.export_geometry(params)
 
@@ -831,6 +833,60 @@ class HoudiniSessionBackend:
             "error": None,
             "context": data,
         }
+
+    def capture_screenshot(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        output_path = str(params.get("output_path", "")).strip()
+        if not output_path:
+            raise RuntimeError("output_path is required")
+        camera_path = str(params.get("camera_path", "")).strip()
+        width = max(64, int(params.get("width", 1024)))
+        height = max(64, int(params.get("height", 1024)))
+
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        obj = self.hou.node("/obj")
+        if not camera_path:
+            camera = self.hou.node("/obj/cam1")
+            if camera is None:
+                camera = obj.createNode("cam", "cam1")
+                camera.parm("tx").set(6)
+                camera.parm("ty").set(4)
+                camera.parm("tz").set(6)
+                camera.parm("rx").set(-25)
+                camera.parm("ry").set(35)
+            camera_path = camera.path()
+        else:
+            camera = self.hou.node(camera_path)
+            if camera is None:
+                raise RuntimeError(f"Camera not found: {camera_path}")
+
+        out = self.hou.node("/out")
+        rop = out.createNode("opengl", "mcp_capture")
+        rop.parm("camera").set(camera_path)
+        if rop.parm("trange"):
+            rop.parm("trange").set(0)
+        if rop.parm("res1"):
+            rop.parm("res1").set(width)
+        if rop.parm("res2"):
+            rop.parm("res2").set(height)
+        if rop.parm("picture"):
+            rop.parm("picture").set(str(output_file))
+        elif rop.parm("vm_picture"):
+            rop.parm("vm_picture").set(str(output_file))
+
+        rop.parm("execute").pressButton()
+        if not output_file.exists():
+            raise RuntimeError(f"Houdini screenshot failed: {output_file}")
+
+        data = {
+            "output_path": str(output_file),
+            "camera_path": camera_path,
+            "width": width,
+            "height": height,
+        }
+        message = f"Captured Houdini screenshot: {output_file.name}"
+        return {"success": True, "message": message, "prompt": message, "error": None, "context": data}
 
     def export_geometry(self, params: Dict[str, Any]) -> Dict[str, Any]:
         geo_path = params["geo_path"]
