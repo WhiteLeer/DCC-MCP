@@ -26,6 +26,7 @@ class LogsWidget(QWidget):
         self._log_dir_prefixes = log_dir_prefixes
         self._compact = compact
         self._entries: list[dict] = []
+        self._flow_only = compact
 
         self._init_ui()
 
@@ -243,7 +244,10 @@ class LogsWidget(QWidget):
         search_text = self.search_input.text().strip().lower() if self.search_input else ""
 
         self.log_text.clear()
+        shown = 0
         for entry in self._entries:
+            if self._should_skip_entry(entry):
+                continue
             if level_filter != "全部" and entry["level"] != level_filter:
                 continue
 
@@ -251,17 +255,55 @@ class LogsWidget(QWidget):
             if search_text and search_text not in haystack:
                 continue
 
-            self.log_text.setTextColor(QColor(self._level_color(entry["level"])))
+            self.log_text.setTextColor(QColor(self._entry_color(entry)))
             self.log_text.append(self._format_log_line(entry))
+            shown += 1
+
+        if shown == 0 and self._flow_only:
+            self.log_text.setTextColor(QColor("#6b7280"))
+            self.log_text.append("暂无流程日志。执行一次工具调用后会显示完整调用链。")
 
         if self.auto_scroll:
             cursor = self.log_text.textCursor()
             cursor.movePosition(QTextCursor.MoveOperation.End)
             self.log_text.setTextCursor(cursor)
 
+    def _should_skip_entry(self, entry: dict) -> bool:
+        msg = str(entry.get("message", ""))
+        level = str(entry.get("level", "INFO")).upper()
+
+        if self._is_noise_message(msg):
+            return True
+
+        if self._flow_only:
+            if "FLOW |" in msg:
+                return False
+            if level in {"ERROR", "WARNING"}:
+                return False
+            return True
+
+        return False
+
+    def _is_noise_message(self, message: str) -> bool:
+        text = message.lower()
+        noise_tokens = [
+            "client connected",
+            "client disconnected",
+            "starting houdini mcp bridge",
+            "starting maya mcp bridge",
+            "starting blender mcp bridge",
+            "starting substance designer mcp bridge",
+            "file logging enabled",
+            "daemon listening on",
+            "failed to cleanup old logs",
+            "found stale lock file",
+        ]
+        return any(token in text for token in noise_tokens)
+
     def _format_log_line(self, entry: dict) -> str:
         timestamp = entry.get("timestamp", "")
         source = entry.get("source", "")
+        message = str(entry.get("message", ""))
 
         try:
             dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
@@ -269,8 +311,63 @@ class LogsWidget(QWidget):
         except Exception:
             time_str = timestamp[:19] if timestamp else "--:--:--"
 
+        if "FLOW |" in message:
+            pretty = self._pretty_flow_message(message, source)
+            return f"[{time_str}] {pretty}"
+
         source_label = f"[{source}]" if source else ""
-        return f"[{time_str}] [{entry['level']:<7}] {source_label} {entry['message']}".strip()
+        return f"[{time_str}] [{entry['level']:<7}] {source_label} {message}".strip()
+
+    def _pretty_flow_message(self, message: str, source: str) -> str:
+        parts = [p.strip() for p in message.split("|")]
+        if len(parts) < 4:
+            return message
+        dcc_label = self._source_to_dcc(source)
+        op = parts[1]
+        status = "OK" if parts[2].lower() == "success" else "FAIL"
+        duration = parts[3]
+        extras = [p for p in parts[4:] if p]
+        lines = [f"[{dcc_label}] {op} [{status}] {duration}"]
+        for extra in extras:
+            if extra.startswith("in="):
+                lines.append(f"  in: {extra[3:]}")
+            elif extra.startswith("out="):
+                lines.append(f"  out: {extra[4:]}")
+            elif extra.startswith("error="):
+                lines.append(f"  error: {extra[6:]}")
+            else:
+                lines.append(f"  {extra}")
+        return "\n".join(lines)
+
+    def _source_to_dcc(self, source: str) -> str:
+        text = (source or "").lower()
+        if "houdini" in text:
+            return "Houdini"
+        if "blender" in text:
+            return "Blender"
+        if "maya" in text:
+            return "Maya"
+        if "substance" in text:
+            return "Substance"
+        return "DCC"
+
+    def _entry_color(self, entry: dict) -> str:
+        message = str(entry.get("message", ""))
+        if "FLOW |" in message:
+            dcc = self._source_to_dcc(str(entry.get("source", "")))
+            return self._dcc_color(dcc)
+        return self._level_color(str(entry.get("level", "INFO")).upper())
+
+    def _dcc_color(self, dcc: str) -> str:
+        if dcc == "Houdini":
+            return "#8b5cf6"
+        if dcc == "Blender":
+            return "#2563eb"
+        if dcc == "Maya":
+            return "#0f766e"
+        if dcc == "Substance":
+            return "#b45309"
+        return "#1f2933"
 
     def _level_color(self, level: str) -> str:
         if level == "ERROR":
