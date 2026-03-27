@@ -9,6 +9,7 @@ from mcp.server.fastmcp import FastMCP
 
 from houdini_mcp.daemon_client import invoke_operation
 from houdini_mcp.daemon_launcher import ensure_daemon_running
+from houdini_mcp.gui.gui_launcher import ensure_unified_gui_running
 from houdini_mcp.utils.logging_config import setup_logging
 from houdini_mcp.utils.pipeline_tools import PipelineOrchestrator
 
@@ -21,6 +22,7 @@ logger = setup_logging(
 
 
 def create_server(name: str = "Houdini-Bridge") -> FastMCP:
+    ensure_unified_gui_running()
     ensure_daemon_running()
     mcp = FastMCP(name=name)
     pipeline = PipelineOrchestrator("houdini", invoke_operation)
@@ -320,6 +322,13 @@ def create_server(name: str = "Houdini-Bridge") -> FastMCP:
         geo_path: str,
         output_path: str,
         file_type: str = "fbx",
+        embed_media: bool = False,
+        convert_axis: bool = False,
+        convert_units: bool = False,
+        axis_system: str = "",
+        vc_format: str = "maya",
+        sdk_version_index: int = -1,
+        target_engine: str = "",
     ) -> dict:
         return await invoke_operation(
             "export_geometry",
@@ -327,6 +336,38 @@ def create_server(name: str = "Houdini-Bridge") -> FastMCP:
                 "geo_path": geo_path,
                 "output_path": output_path,
                 "file_type": file_type,
+                "embed_media": embed_media,
+                "convert_axis": convert_axis,
+                "convert_units": convert_units,
+                "axis_system": axis_system,
+                "vc_format": vc_format,
+                "sdk_version_index": sdk_version_index,
+                "target_engine": target_engine,
+            },
+        )
+
+    @mcp.tool()
+    async def export_unity_fbx(
+        geo_path: str,
+        output_path: str,
+        embed_media: bool = True,
+        convert_axis: bool = True,
+        convert_units: bool = True,
+        axis_system: str = "yupleft",
+        vc_format: str = "maya",
+        sdk_version_index: int = 2,
+    ) -> dict:
+        return await invoke_operation(
+            "export_unity_fbx",
+            {
+                "geo_path": geo_path,
+                "output_path": output_path,
+                "embed_media": embed_media,
+                "convert_axis": convert_axis,
+                "convert_units": convert_units,
+                "axis_system": axis_system,
+                "vc_format": vc_format,
+                "sdk_version_index": sdk_version_index,
             },
         )
 

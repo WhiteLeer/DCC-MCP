@@ -72,6 +72,8 @@ class HoudiniSessionBackend:
             return self.capture_screenshot(params)
         if operation == "export_geometry":
             return self.export_geometry(params)
+        if operation == "export_unity_fbx":
+            return self.export_unity_fbx(params)
 
         return {"success": False, "error": f"Unknown operation: {operation}", "error_type": "UnknownOperation"}
 
@@ -892,6 +894,13 @@ class HoudiniSessionBackend:
         geo_path = params["geo_path"]
         output_path = params["output_path"]
         file_type = params.get("file_type", "").lower().strip()
+        embed_media = bool(params.get("embed_media", False))
+        convert_axis = bool(params.get("convert_axis", False))
+        convert_units = bool(params.get("convert_units", False))
+        axis_system = str(params.get("axis_system", "")).strip()
+        vc_format = str(params.get("vc_format", "maya")).strip().lower()
+        sdk_version_index = int(params.get("sdk_version_index", -1))
+        target_engine = str(params.get("target_engine", "")).strip().lower()
 
         output_ext = os.path.splitext(output_path)[1].lower()
         if not file_type:
@@ -900,12 +909,34 @@ class HoudiniSessionBackend:
             raise RuntimeError(f"Only fbx export is currently supported, got: {file_type}")
 
         geo_node, display_node = self._resolve_display_node(geo_path)
-        export_node = geo_node.createNode("rop_fbx", "export_fbx1")
-        export_node.parm("startnode").set(display_node.path())
-        export_node.parm("sopoutput").set(output_path)
-        if export_node.parm("vcformat"):
-            export_node.parm("vcformat").set(1)
-        geo_node.layoutChildren()
+
+        # Engine presets first, allow explicit params to override after this block.
+        if target_engine == "unity":
+            embed_media = True if "embed_media" not in params else embed_media
+            convert_axis = True if "convert_axis" not in params else convert_axis
+            convert_units = True if "convert_units" not in params else convert_units
+            if not axis_system:
+                axis_system = "yupleft"
+            if "vc_format" not in params:
+                vc_format = "maya"
+            if "sdk_version_index" not in params:
+                sdk_version_index = 2  # FBX201800
+
+        out = self.hou.node("/out")
+        export_node = out.createNode("filmboxfbx", "export_fbx1")
+        self._set_parm_if_exists(export_node, "startnode", display_node.path())
+        self._set_parm_if_exists(export_node, "sopoutput", output_path)
+        self._set_parm_if_exists(export_node, "embedmedia", 1 if embed_media else 0)
+        self._set_parm_if_exists(export_node, "convertaxis", 1 if convert_axis else 0)
+        self._set_parm_if_exists(export_node, "convertunits", 1 if convert_units else 0)
+        if axis_system:
+            self._set_menu_parm_if_exists(export_node, "axissystem", axis_system)
+        if vc_format in {"maya", "max"}:
+            self._set_parm_if_exists(export_node, "vcformat", 0 if vc_format == "maya" else 1)
+        if sdk_version_index >= 0:
+            self._set_menu_index_parm_if_exists(export_node, "sdkversion", sdk_version_index)
+
+        out.layoutChildren()
         export_node.parm("execute").pressButton()
 
         if not os.path.exists(output_path):
@@ -916,6 +947,13 @@ class HoudiniSessionBackend:
             "geo_path": display_node.path(),
             "output_path": output_path,
             "file_type": file_type,
+            "target_engine": target_engine,
+            "embed_media": embed_media,
+            "convert_axis": convert_axis,
+            "convert_units": convert_units,
+            "axis_system": axis_system or None,
+            "vc_format": vc_format,
+            "sdk_version_index": sdk_version_index,
             "message": f"Exported geometry to {output_path}",
         }
         return {
@@ -925,6 +963,14 @@ class HoudiniSessionBackend:
             "error": None,
             "context": data,
         }
+
+    def export_unity_fbx(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        export_params = dict(params)
+        export_params["file_type"] = "fbx"
+        export_params["target_engine"] = "unity"
+        if "embed_media" not in export_params:
+            export_params["embed_media"] = True
+        return self.export_geometry(export_params)
 
     def _resolve_display_node(self, node_path: str):
         node = self.hou.node(node_path)
@@ -957,6 +1003,44 @@ class HoudiniSessionBackend:
     def _merge_attribute_patterns(self, existing: str, addition: str) -> str:
         merged = [token for token in (existing.split() + addition.split()) if token]
         return " ".join(dict.fromkeys(merged))
+
+    def _set_parm_if_exists(self, node, parm_name: str, value: Any) -> None:
+        parm = node.parm(parm_name)
+        if parm is not None:
+            parm.set(value)
+
+    def _set_menu_parm_if_exists(self, node, parm_name: str, token_or_label: str) -> None:
+        parm = node.parm(parm_name)
+        if parm is None:
+            return
+        try:
+            items = parm.menuItems()
+            labels = parm.menuLabels()
+            if token_or_label in items:
+                parm.set(token_or_label)
+                return
+            for i, label in enumerate(labels):
+                if token_or_label.lower() in str(label).lower():
+                    parm.set(i)
+                    return
+            # Last fallback: try raw value directly.
+            parm.set(token_or_label)
+        except Exception:
+            pass
+
+    def _set_menu_index_parm_if_exists(self, node, parm_name: str, index: int) -> None:
+        parm = node.parm(parm_name)
+        if parm is None:
+            return
+        try:
+            items = parm.menuItems()
+            if not items:
+                parm.set(index)
+                return
+            clamped = max(0, min(index, len(items) - 1))
+            parm.set(items[clamped])
+        except Exception:
+            pass
 
     def _sanitize_node_name(self, value: str, uppercase: bool = False) -> str:
         text = re.sub(r"[^0-9A-Za-z_]+", "_", value.strip())

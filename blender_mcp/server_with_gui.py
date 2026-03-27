@@ -1,4 +1,4 @@
-﻿"""Codex MCP bridge for the persistent Blender daemon."""
+"""Codex MCP bridge for the persistent Blender daemon."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from blender_mcp.daemon_client import invoke_operation
 from blender_mcp.daemon_launcher import ensure_daemon_running
+from houdini_mcp.gui.gui_launcher import ensure_unified_gui_running
 from houdini_mcp.utils.logging_config import setup_logging
 from houdini_mcp.utils.pipeline_tools import PipelineOrchestrator
 
@@ -20,6 +21,7 @@ logger = setup_logging(
 
 
 def create_server(name: str = "Blender-Bridge") -> FastMCP:
+    ensure_unified_gui_running()
     ensure_daemon_running()
     mcp = FastMCP(name=name)
     pipeline = PipelineOrchestrator("blender", invoke_operation)
