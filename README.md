@@ -6,6 +6,7 @@
 - 一个统一控制面板，管理四套 DCC MCP
 - 后台常驻 daemon，避免短生命周期桥接进程不稳定
 - GUI 和 MCP 客户端可同时工作
+- 面板默认不自动弹出，需要时手动打开
 
 支持：
 - Houdini
@@ -21,7 +22,7 @@
 - 已安装对应 DCC（Houdini / Maya / Blender / Substance Designer）
 - 一个 MCP 客户端（Codex / Claude Code / 其他）
 
-### 2. 启动统一面板
+### 2. 启动统一面板（按需）
 
 ```bash
 python run_unified_gui.py
@@ -36,10 +37,9 @@ python run_unified_gui.py
 ### 3. 在面板中检查状态
 
 对每个 DCC：
-- 自动检测环境
-- 测试 MCP 连接
-- 清理旧进程
-- 重启 MCP 服务器
+- 模块开关（启动/关闭 daemon）
+- 心跳检测（运行中/未响应/未启动/关闭）
+- 查看调用日志（自动加载历史）
 
 ### 4. 配置 MCP 客户端
 
@@ -123,6 +123,10 @@ flowchart LR
 - Auto daemon bootstrap when launching GUI/bridge
 - Unified control panel for all 4 DCCs
 - Pipeline-oriented MCP tools for batch/workflow/validation/publish
+- 可选模块面板 + 心跳状态 + 日志聚合（打开时自动加载历史）
+- DCC 截图工具（Houdini/Maya/Blender/Substance）
+- DCC 导入模型/贴图流程工具
+- Houdini Unity FBX 导出（内嵌贴图）
 
 ## New Pipeline Tools（所有 DCC Bridge 通用）
 
@@ -148,10 +152,27 @@ flowchart LR
 }
 ```
 
+## New DCC Tools（最近新增）
+
+### 导入模型
+- Houdini: `import_model`（支持 normalize_normals / center_to_origin / uniform_scale）
+- Blender: `import_model`（支持 apply_transform / merge_by_distance / recalc_normals / auto_triangulate）
+- Maya: `import_geometry` / `import_model`（支持 namespace / group / freeze / center / scale 等）
+
+### Substance 贴图
+- `import_texture`：导入贴图到输出目录（可转格式/改分辨率）
+- `process_texture`：基础处理（亮度/对比度/锐化/模糊/slope blur 等）
+
+### 截图
+- Houdini / Maya / Blender / Substance: `capture_screenshot`
+
+### Unity 友好导出
+- Houdini: `export_unity_fbx`（FBX + 内嵌贴图 + 轴系转换）
+
 ## Run Modes
 
 ### 统一面板
-- `python run_unified_gui.py`
+- `python run_unified_gui.py`（默认不自动弹出）
 - `启动DCC-MCP.bat`
 - Desktop shortcut: `DCC_MCP_Control.lnk`
 
@@ -209,6 +230,7 @@ args = ["-u", "C:/Users/wepie/dcc-mcp/substance_mcp/server_with_gui.py"]
 - 建议优先从统一面板启动，这样会自动拉起/修复 daemon。
 - 场景文件路径建议使用绝对路径（便于跨工具联动和排错）。
 - 当前项目使用的是 `MCP 协议 + FastMCP 实现层`。
+- 如需自动弹出 GUI：设置环境变量 `DCC_MCP_AUTO_OPEN_GUI=1`。
 
 ## Blender Notes
 
