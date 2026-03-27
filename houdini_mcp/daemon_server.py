@@ -83,14 +83,14 @@ class HoudiniDaemon:
 
     async def _handle_client(self, websocket: WebSocketServerProtocol, path: str | None = None) -> None:
         client_addr = websocket.remote_address
-        logger.info(f"Client connected: {client_addr}")
+        logger.debug(f"Client connected: {client_addr}")
         self.clients.add(websocket)
         try:
             await self._send_status(websocket)
             async for message in websocket:
                 await self._handle_message(websocket, message)
         except websockets.exceptions.ConnectionClosed:
-            logger.info(f"Client disconnected: {client_addr}")
+            logger.debug(f"Client disconnected: {client_addr}")
         except Exception as e:
             logger.error(f"Error handling client {client_addr}: {e}", exc_info=True)
             try:
@@ -197,6 +197,27 @@ class HoudiniDaemon:
         except Exception as e:
             result = {"success": False, "error": str(e), "error_type": type(e).__name__}
         duration = result.get("_timing", {}).get("duration_seconds", time.time() - start_time)
+        status = "success" if result.get("success") else "failed"
+
+        flow_parts = [
+            "FLOW",
+            operation or "unknown",
+            status,
+            f"{duration:.2f}s",
+        ]
+        if params.get("input_path"):
+            flow_parts.append(f"in={params.get('input_path')}")
+        if params.get("geo_path"):
+            flow_parts.append(f"in={params.get('geo_path')}")
+        context = result.get("context") or result.get("data") or {}
+        for key in ("output_path", "node_path", "hip_file"):
+            value = context.get(key)
+            if value and isinstance(value, str):
+                flow_parts.append(f"out={value}")
+                break
+        if result.get("error"):
+            flow_parts.append(f"error={result.get('error')}")
+        logger.info(" | ".join(flow_parts))
 
         self.stats["total_operations"] += 1
         if result.get("success"):
@@ -214,7 +235,7 @@ class HoudiniDaemon:
             operation_log(
                 timestamp=datetime.now().isoformat(),
                 operation=operation,
-                status="success" if result.get("success") else "failed",
+                status=status,
                 duration=duration,
                 params=params,
                 result=result if result.get("success") else None,
