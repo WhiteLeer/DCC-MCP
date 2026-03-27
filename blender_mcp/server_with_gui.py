@@ -9,6 +9,7 @@ from mcp.server.fastmcp import FastMCP
 from blender_mcp.daemon_client import invoke_operation
 from blender_mcp.daemon_launcher import ensure_daemon_running
 from houdini_mcp.utils.logging_config import setup_logging
+from houdini_mcp.utils.pipeline_tools import PipelineOrchestrator
 
 logger = setup_logging(
     name="blender-mcp-bridge",
@@ -21,6 +22,7 @@ logger = setup_logging(
 def create_server(name: str = "Blender-Bridge") -> FastMCP:
     ensure_daemon_running()
     mcp = FastMCP(name=name)
+    pipeline = PipelineOrchestrator("blender", invoke_operation)
 
     @mcp.tool()
     async def get_scene_state() -> dict:
@@ -50,6 +52,37 @@ def create_server(name: str = "Blender-Bridge") -> FastMCP:
         return await invoke_operation(
             "import_geometry",
             {"input_path": input_path, "output_blend": output_blend},
+        )
+
+    @mcp.tool()
+    async def import_model(
+        input_path: str,
+        output_blend: str = "",
+        clear_scene: bool = True,
+        location: list[float] | None = None,
+        rotation: list[float] | None = None,
+        scale: list[float] | None = None,
+        apply_transform: bool = False,
+        auto_triangulate: bool = False,
+        recalculate_normals: bool = False,
+        merge_by_distance: bool = False,
+        merge_distance: float = 0.0001,
+    ) -> dict:
+        return await invoke_operation(
+            "import_model",
+            {
+                "input_path": input_path,
+                "output_blend": output_blend,
+                "clear_scene": clear_scene,
+                "location": location or [0.0, 0.0, 0.0],
+                "rotation": rotation or [0.0, 0.0, 0.0],
+                "scale": scale or [1.0, 1.0, 1.0],
+                "apply_transform": apply_transform,
+                "auto_triangulate": auto_triangulate,
+                "recalculate_normals": recalculate_normals,
+                "merge_by_distance": merge_by_distance,
+                "merge_distance": merge_distance,
+            },
         )
 
     @mcp.tool()
@@ -109,6 +142,68 @@ def create_server(name: str = "Blender-Bridge") -> FastMCP:
             "merge_by_distance",
             {"input_blend": input_blend, "output_blend": output_blend, "distance": distance},
         )
+
+    @mcp.tool()
+    async def workflow_run(
+        steps: list[dict],
+        stop_on_error: bool = True,
+        workflow_name: str = "",
+        metadata: dict | None = None,
+    ) -> dict:
+        return await pipeline.workflow_run(
+            steps=steps,
+            stop_on_error=stop_on_error,
+            workflow_name=workflow_name,
+            metadata=metadata,
+        )
+
+    @mcp.tool()
+    async def batch_run(
+        operations: list[dict],
+        continue_on_error: bool = True,
+        batch_name: str = "",
+        metadata: dict | None = None,
+    ) -> dict:
+        return await pipeline.batch_run(
+            operations=operations,
+            continue_on_error=continue_on_error,
+            batch_name=batch_name,
+            metadata=metadata,
+        )
+
+    @mcp.tool()
+    async def validate_asset(
+        path: str,
+        expected_types: list[str] | None = None,
+        required_tokens: list[str] | None = None,
+        min_size_bytes: int = 1,
+    ) -> dict:
+        return await pipeline.validate_asset(
+            path=path,
+            expected_types=expected_types,
+            required_tokens=required_tokens,
+            min_size_bytes=min_size_bytes,
+        )
+
+    @mcp.tool()
+    async def publish_asset(
+        input_path: str,
+        publish_dir: str,
+        asset_name: str = "",
+        version: str = "",
+        write_manifest: bool = True,
+    ) -> dict:
+        return await pipeline.publish_asset(
+            input_path=input_path,
+            publish_dir=publish_dir,
+            asset_name=asset_name,
+            version=version,
+            write_manifest=write_manifest,
+        )
+
+    @mcp.tool()
+    async def get_job_status(job_id: str = "", include_steps: bool = True) -> dict:
+        return await pipeline.get_job_status(job_id=job_id, include_steps=include_steps)
 
     return mcp
 

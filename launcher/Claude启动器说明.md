@@ -1,4 +1,4 @@
-# ⚙️ Claude Code 智能启动器 - 使用说明
+﻿# ⚙️ Claude Code 智能启动器 - 使用说明
 
 > **版本**: v1.0
 > **创建日期**: 2026-03-16
@@ -287,3 +287,5 @@ active_config = nomcp_config
 ---
 
 **Master，您的智能启动器已就绪！** 🚀
+
+

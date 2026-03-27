@@ -26,6 +26,8 @@ class BlenderSessionBackend:
             return self.clean_scene(params)
         if operation == "import_geometry":
             return self.import_geometry(params)
+        if operation == "import_model":
+            return self.import_model(params)
         if operation == "export_fbx":
             return self.export_fbx(params)
         if operation == "decimate_mesh":
@@ -209,6 +211,110 @@ _ok({{"input_path": r\"{input_path}\", "output_blend": out_path, "object_count":
             return result
         data = result["data"]
         message = f"Imported geometry: {Path(input_path).name}"
+        return {"success": True, "message": message, "prompt": message, "error": None, "context": data}
+
+    def import_model(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        input_path = params.get("input_path", "")
+        output_blend = params.get("output_blend", "")
+        if not input_path:
+            raise RuntimeError("input_path is required")
+        if not Path(input_path).exists():
+            raise RuntimeError(f"File not found: {input_path}")
+
+        clear_scene = bool(params.get("clear_scene", True))
+        location = params.get("location") or [0.0, 0.0, 0.0]
+        rotation = params.get("rotation") or [0.0, 0.0, 0.0]
+        scale = params.get("scale") or [1.0, 1.0, 1.0]
+        apply_transform = bool(params.get("apply_transform", False))
+        auto_triangulate = bool(params.get("auto_triangulate", False))
+        recalc_normals = bool(params.get("recalculate_normals", False))
+        merge_by_distance = bool(params.get("merge_by_distance", False))
+        merge_distance = max(0.0, float(params.get("merge_distance", 0.0001)))
+
+        suffix = Path(input_path).suffix.lower()
+        if suffix == ".fbx":
+            import_stmt = f"bpy.ops.import_scene.fbx(filepath=r\"{input_path}\")"
+        elif suffix == ".obj":
+            import_stmt = f"bpy.ops.wm.obj_import(filepath=r\"{input_path}\")"
+        elif suffix in {".glb", ".gltf"}:
+            import_stmt = f"bpy.ops.import_scene.gltf(filepath=r\"{input_path}\")"
+        elif suffix in {".stl"}:
+            import_stmt = f"bpy.ops.wm.stl_import(filepath=r\"{input_path}\")"
+        else:
+            raise RuntimeError(f"Unsupported import format: {suffix}")
+
+        clear_stmt = ""
+        if clear_scene:
+            clear_stmt = (
+                "bpy.ops.object.select_all(action='SELECT')\n"
+                "bpy.ops.object.delete(use_global=False)\n"
+            )
+
+        script = f"""
+import bpy
+import math
+
+{clear_stmt}
+before_names = set(obj.name for obj in bpy.data.objects)
+{import_stmt}
+imported = [obj for obj in bpy.data.objects if obj.name not in before_names]
+
+for obj in imported:
+    obj.location = ({float(location[0])}, {float(location[1])}, {float(location[2])})
+    obj.rotation_euler = (math.radians({float(rotation[0])}), math.radians({float(rotation[1])}), math.radians({float(rotation[2])}))
+    obj.scale = ({float(scale[0])}, {float(scale[1])}, {float(scale[2])})
+
+if {str(apply_transform)}:
+    bpy.ops.object.select_all(action='DESELECT')
+    for obj in imported:
+        obj.select_set(True)
+    if imported:
+        bpy.context.view_layer.objects.active = imported[0]
+        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+
+mesh_count = 0
+for obj in imported:
+    if obj.type == 'MESH':
+        mesh_count += 1
+        if {str(auto_triangulate)}:
+            mod = obj.modifiers.new(name='TriangulateMCP', type='TRIANGULATE')
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+        if {str(recalc_normals)}:
+            bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.object.select_all(action='DESELECT')
+            obj.select_set(True)
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.mesh.normals_make_consistent(inside=False)
+            if {str(merge_by_distance)}:
+                bpy.ops.mesh.remove_doubles(threshold={merge_distance})
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+out_path = r\"{output_blend}\".strip()
+if out_path:
+    bpy.ops.wm.save_as_mainfile(filepath=out_path)
+
+_ok({{
+    "input_path": r\"{input_path}\",
+    "output_blend": out_path,
+    "imported_object_count": len(imported),
+    "imported_object_names": [obj.name for obj in imported][:200],
+    "mesh_count": mesh_count,
+    "clear_scene": {str(clear_scene)},
+    "apply_transform": {str(apply_transform)},
+    "auto_triangulate": {str(auto_triangulate)},
+    "recalculate_normals": {str(recalc_normals)},
+    "merge_by_distance": {str(merge_by_distance)},
+    "merge_distance": {merge_distance}
+}})
+"""
+        result = self._run_blender_script(script)
+        if not result.get("success"):
+            return result
+        data = result["data"]
+        message = f"Imported model with params: {Path(input_path).name} ({data.get('imported_object_count', 0)} objects)"
         return {"success": True, "message": message, "prompt": message, "error": None, "context": data}
 
     def export_fbx(self, params: Dict[str, Any]) -> Dict[str, Any]:

@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM 安装 Claude Code 启动器所需的 Python 依赖
 
 cd /d "%~dp0"
@@ -37,3 +37,5 @@ echo - 如果没有 pywin32，窗口标题功能将被跳过
 echo - 其他功能不受影响
 echo.
 pause
+
+

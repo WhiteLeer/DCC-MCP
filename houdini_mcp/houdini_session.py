@@ -66,6 +66,8 @@ class HoudiniSessionBackend:
             return self.boolean(params)
         if operation == "import_geometry":
             return self.import_geometry(params)
+        if operation == "import_model":
+            return self.import_model(params)
         if operation == "export_geometry":
             return self.export_geometry(params)
 
@@ -737,6 +739,95 @@ class HoudiniSessionBackend:
             "success": True,
             "message": data["message"],
             "prompt": f"Import completed: {data['message']}. Node: {data['node_path']}",
+            "error": None,
+            "context": data,
+        }
+
+    def import_model(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        file_path = params["file_path"]
+        node_name = params.get("node_name", "imported_geo")
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        uniform_scale = float(params.get("uniform_scale", 1.0))
+        center_to_origin = bool(params.get("center_to_origin", False))
+        normalize_normals = bool(params.get("normalize_normals", False))
+        output_name = params.get("output_name", "import_model")
+
+        ext = os.path.splitext(file_path)[1].lower()
+        obj = self.hou.node("/obj")
+        geo = obj.createNode("geo", node_name)
+        for child in geo.children():
+            child.destroy()
+
+        if ext == ".abc":
+            file_node = geo.createNode("alembic", "import1")
+            file_node.parm("fileName").set(file_path)
+        else:
+            file_node = geo.createNode("file", "import1")
+            file_node.parm("file").set(file_path)
+
+        current = file_node
+        imported_geo = None
+        try:
+            file_node.cook(force=True)
+            imported_geo = file_node.geometry()
+        except Exception:
+            imported_geo = None
+
+        if abs(uniform_scale - 1.0) > 1e-6 or center_to_origin:
+            xform = geo.createNode("xform", "xform_import")
+            xform.setInput(0, current)
+            if xform.parm("sx"):
+                xform.parm("sx").set(uniform_scale)
+            if xform.parm("sy"):
+                xform.parm("sy").set(uniform_scale)
+            if xform.parm("sz"):
+                xform.parm("sz").set(uniform_scale)
+
+            if center_to_origin and imported_geo is not None:
+                bbox = imported_geo.boundingBox()
+                center = bbox.center()
+                if xform.parm("tx"):
+                    xform.parm("tx").set(-center[0])
+                if xform.parm("ty"):
+                    xform.parm("ty").set(-center[1])
+                if xform.parm("tz"):
+                    xform.parm("tz").set(-center[2])
+            current = xform
+
+        if normalize_normals:
+            normal = geo.createNode("normal", "normal_import")
+            normal.setInput(0, current)
+            if normal.parm("normalize"):
+                normal.parm("normalize").set(1)
+            current = normal
+
+        current.setName(output_name, unique_name=True)
+        current.setDisplayFlag(True)
+        current.setRenderFlag(True)
+        geo.layoutChildren()
+        current.cook(force=True)
+
+        geo_data = current.geometry()
+        poly_count = len(geo_data.prims()) if geo_data else 0
+        point_count = len(geo_data.points()) if geo_data else 0
+        data = {
+            "node_path": geo.path(),
+            "result_sop_path": current.path(),
+            "file_path": file_path,
+            "file_type": ext,
+            "uniform_scale": uniform_scale,
+            "center_to_origin": center_to_origin,
+            "normalize_normals": normalize_normals,
+            "poly_count": poly_count,
+            "point_count": point_count,
+            "message": f"Imported model {os.path.basename(file_path)} with params",
+        }
+        return {
+            "success": True,
+            "message": data["message"],
+            "prompt": f"Import model completed: {data['message']}. Node: {data['result_sop_path']}",
             "error": None,
             "context": data,
         }

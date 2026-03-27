@@ -1,10 +1,10 @@
-{
+﻿{
   "mcpServers": {
     "houdini-mcp": {
       "command": "C:/Program Files/Side Effects Software/Houdini 20.5.487/bin/hython.exe",
       "args": [
         "-u",
-        "C:/Users/wepie/houdini-mcp/houdini_mcp/server_with_gui.py"
+        "C:/Users/wepie/dcc-mcp/houdini_mcp/server_with_gui.py"
       ],
       "env": {
         "PYTHONUNBUFFERED": "1"
@@ -12,3 +12,6 @@
     }
   }
 }
+
+
+

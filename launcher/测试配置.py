@@ -1,4 +1,4 @@
-"""
+﻿"""
 测试 Claude Code MCP 配置是否正确
 """
 import json
@@ -61,3 +61,5 @@ if PLUGIN_CONFIG.exists() and MCP_CONFIG.exists() and not desktop_config.exists(
 else:
     print("⚠️ 配置存在问题，请检查上述输出")
 print("=" * 60)
+
+

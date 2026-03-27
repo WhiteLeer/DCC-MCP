@@ -1,4 +1,4 @@
-# Legacy launcher
+﻿# Legacy launcher
 
 This directory contains the older `Claude Code` launcher flow.
 
@@ -29,3 +29,5 @@ Use the docs in the repo root instead:
 ## Status of files here
 
 These files are kept for migration reference only. They should not be used as the primary onboarding path for new users of the project.
+
+

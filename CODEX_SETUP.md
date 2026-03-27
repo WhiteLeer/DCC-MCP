@@ -1,4 +1,4 @@
-# Houdini MCP for Codex
+﻿# Houdini MCP for Codex
 
 ## Setup
 
@@ -7,11 +7,11 @@ Edit `C:/Users/wepie/.codex/config.toml`:
 ```toml
 [mcp_servers.houdini_mcp]
 command = "python"
-args = ["-u", "C:/Users/wepie/houdini-mcp/houdini_mcp/server_with_gui.py"]
+args = ["-u", "C:/Users/wepie/dcc-mcp/houdini_mcp/server_with_gui.py"]
 
 [mcp_servers.houdini_mcp.env]
 PYTHONUNBUFFERED = "1"
-PYTHONPATH = "C:/Users/wepie/houdini-mcp"
+PYTHONPATH = "C:/Users/wepie/dcc-mcp"
 ```
 
 Then fully restart `Codex`.
@@ -58,3 +58,4 @@ python verify_codex_setup.py
 ## Source
 
 OpenAI documents the shared `Codex` MCP config location in `~/.codex/config.toml`: [Docs MCP](https://developers.openai.com/learn/docs-mcp)
+

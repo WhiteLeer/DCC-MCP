@@ -1,4 +1,4 @@
-# Substance Designer MCP for Codex
+﻿# Substance Designer MCP for Codex
 
 ## Setup
 
@@ -7,11 +7,11 @@ Edit `C:/Users/wepie/.codex/config.toml`:
 ```toml
 [mcp_servers.substance_designer_mcp]
 command = "C:/Program Files/Python311/python.exe"
-args = ["-u", "C:/Users/wepie/houdini-mcp/substance_mcp/server_with_gui.py"]
+args = ["-u", "C:/Users/wepie/dcc-mcp/substance_mcp/server_with_gui.py"]
 
 [mcp_servers.substance_designer_mcp.env]
 PYTHONUNBUFFERED = "1"
-PYTHONPATH = "C:/Users/wepie/houdini-mcp"
+PYTHONPATH = "C:/Users/wepie/dcc-mcp"
 SUBSTANCE_DESIGNER_EXE = "D:/常用软件/Substance 3D Designer/Adobe Substance 3D Designer.exe"
 ```
 
@@ -25,4 +25,5 @@ Then fully restart `Codex`.
 - `render_sbsar`
 - `cook_sbs`
 - `list_outputs`
+
 

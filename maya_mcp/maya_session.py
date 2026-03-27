@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Dict
 
 
@@ -57,6 +58,10 @@ class MayaSessionBackend:
             return self.duplicate_node(params)
         if operation == "parent_node":
             return self.parent_node(params)
+        if operation == "import_geometry":
+            return self.import_geometry(params)
+        if operation == "import_model":
+            return self.import_model(params)
 
         return {"success": False, "error": f"Unknown operation: {operation}", "error_type": "UnknownOperation"}
 
@@ -269,6 +274,151 @@ class MayaSessionBackend:
             "error": None,
             "context": data,
         }
+
+    def import_geometry(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        input_path = str(params.get("input_path", "")).strip()
+        if not input_path:
+            raise RuntimeError("input_path is required")
+        if not Path(input_path).exists():
+            raise RuntimeError(f"File not found: {input_path}")
+
+        namespace = str(params.get("namespace", "mcp")).strip() or "mcp"
+        clean_scene = bool(params.get("clean_scene", False))
+        group_name = str(params.get("group_name", "")).strip()
+        file_options = str(params.get("file_options", "")).strip() or "v=0;"
+        merge_namespaces = bool(params.get("merge_namespaces_on_clash", True))
+
+        if clean_scene:
+            self.cmds.file(new=True, force=True)
+
+        file_type = self._maya_import_type(input_path)
+        self._ensure_import_plugin(file_type)
+
+        before = set(self.cmds.ls(long=True) or [])
+        try:
+            new_nodes = self.cmds.file(
+                input_path,
+                i=True,
+                type=file_type,
+                ignoreVersion=True,
+                ra=True,
+                mergeNamespacesOnClash=merge_namespaces,
+                namespace=namespace,
+                options=file_options,
+                pr=True,
+                returnNewNodes=True,
+            ) or []
+        except Exception:
+            # Fallback for files that do not accept explicit type/options.
+            new_nodes = self.cmds.file(
+                input_path,
+                i=True,
+                ignoreVersion=True,
+                ra=True,
+                mergeNamespacesOnClash=merge_namespaces,
+                namespace=namespace,
+                pr=True,
+                returnNewNodes=True,
+            ) or []
+
+        if not new_nodes:
+            after = set(self.cmds.ls(long=True) or [])
+            new_nodes = sorted(list(after - before))
+
+        transforms = [n for n in new_nodes if self.cmds.objExists(n) and self.cmds.nodeType(n) == "transform"]
+        roots = [n for n in transforms if not self.cmds.listRelatives(n, parent=True)]
+        group_node = ""
+        if group_name and roots:
+            group_node = self.cmds.group(roots, name=group_name)
+
+        data = {
+            "input_path": input_path,
+            "file_type": file_type,
+            "namespace": namespace,
+            "new_node_count": len(new_nodes),
+            "transform_count": len(transforms),
+            "root_transforms": roots[:200],
+            "group_node": group_node,
+            "message": f"Imported {Path(input_path).name} ({len(transforms)} transforms)",
+        }
+        return {
+            "success": True,
+            "message": data["message"],
+            "prompt": data["message"],
+            "error": None,
+            "context": data,
+        }
+
+    def import_model(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        result = self.import_geometry(params)
+        if not result.get("success"):
+            return result
+
+        context = result.get("context", {})
+        roots = list(context.get("root_transforms") or [])
+        if context.get("group_node"):
+            roots = [context["group_node"]]
+
+        uniform_scale = float(params.get("uniform_scale", 1.0))
+        freeze_after_import = bool(params.get("freeze_after_import", False))
+        center_pivot_after_import = bool(params.get("center_pivot_after_import", False))
+        delete_history_after_import = bool(params.get("delete_history_after_import", False))
+
+        if abs(uniform_scale - 1.0) > 1e-6:
+            for node in roots:
+                if self.cmds.objExists(node):
+                    self.cmds.setAttr(f"{node}.scaleX", uniform_scale)
+                    self.cmds.setAttr(f"{node}.scaleY", uniform_scale)
+                    self.cmds.setAttr(f"{node}.scaleZ", uniform_scale)
+
+        for node in roots:
+            if not self.cmds.objExists(node):
+                continue
+            if delete_history_after_import:
+                self.cmds.delete(node, ch=True)
+            if freeze_after_import:
+                self.cmds.makeIdentity(node, apply=True, translate=True, rotate=True, scale=True, normal=False)
+            if center_pivot_after_import:
+                self.cmds.xform(node, centerPivots=True)
+
+        context["uniform_scale"] = uniform_scale
+        context["freeze_after_import"] = freeze_after_import
+        context["center_pivot_after_import"] = center_pivot_after_import
+        context["delete_history_after_import"] = delete_history_after_import
+        context["message"] = f"Imported model with params: {Path(context['input_path']).name}"
+        result["message"] = context["message"]
+        result["prompt"] = context["message"]
+        return result
+
+    def _maya_import_type(self, path_value: str) -> str:
+        ext = Path(path_value).suffix.lower()
+        if ext == ".fbx":
+            return "FBX"
+        if ext == ".obj":
+            return "OBJ"
+        if ext == ".abc":
+            return "Alembic"
+        if ext == ".ma":
+            return "mayaAscii"
+        if ext == ".mb":
+            return "mayaBinary"
+        raise RuntimeError(f"Unsupported import format: {ext}")
+
+    def _ensure_import_plugin(self, import_type: str) -> None:
+        plugin_map = {
+            "FBX": "fbxmaya",
+            "OBJ": "objExport",
+            "Alembic": "AbcImport",
+        }
+        plugin = plugin_map.get(import_type)
+        if not plugin:
+            return
+        try:
+            if not self.cmds.pluginInfo(plugin, query=True, loaded=True):
+                self.cmds.loadPlugin(plugin)
+        except Exception:
+            # Keep import attempt behavior unchanged when plugin probing is unsupported.
+            pass
 
     def _resolve_transform(self, node: str) -> str:
         if not node:

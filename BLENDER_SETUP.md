@@ -20,7 +20,7 @@ python run_blender_gui.py
 
 或双击：
 
-`启动BlenderGUI.bat`
+`启动DCC-MCP.bat`
 
 ## 3) 可用 MCP 工具（当前）
 

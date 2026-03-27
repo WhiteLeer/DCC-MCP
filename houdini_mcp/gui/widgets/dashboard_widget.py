@@ -125,6 +125,17 @@ class DashboardWidget(QWidget):
         path_group.setLayout(path_layout)
         layout.addWidget(path_group)
 
+        pipeline_group = QGroupBox("🧪 管线工具支持")
+        pipeline_layout = QVBoxLayout()
+        pipeline_hint = QLabel(
+            "已支持: workflow_run / batch_run / validate_asset / publish_asset / get_job_status\n"
+            "说明: 在 MCP 客户端中调用这些工具，GUI 会在“操作历史”中显示执行记录。"
+        )
+        pipeline_hint.setWordWrap(True)
+        pipeline_layout.addWidget(pipeline_hint)
+        pipeline_group.setLayout(pipeline_layout)
+        layout.addWidget(pipeline_group)
+
         layout.addStretch()
 
     def update_status(self, status: dict):

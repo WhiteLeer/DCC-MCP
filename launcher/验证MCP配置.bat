@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 chcp 65001 > nul
 echo ============================================
 echo    Houdini MCP 配置验证工具
@@ -50,3 +50,5 @@ echo.
 echo 如果发现问题，请查看: 系统诊断报告.md
 echo.
 pause
+
+
