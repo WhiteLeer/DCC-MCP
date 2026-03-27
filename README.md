@@ -1,24 +1,61 @@
 # DCC MCP (Houdini / Maya / Blender / Substance)
 
-Unified DCC MCP toolkit for `Codex`, based on **persistent local daemons**.
+面向 DCC 生产流程的 MCP 工具集（支持 `Codex` / Claude Code 等客户端）。
 
-Supported DCCs:
+核心目标：
+- 一个统一控制面板，管理四套 DCC MCP
+- 后台常驻 daemon，避免短生命周期桥接进程不稳定
+- GUI 和 MCP 客户端可同时工作
+
+支持：
 - Houdini
 - Maya
 - Blender
 - Substance Designer
 
+## Quick Start（推荐）
+
+### 1. 环境准备
+
+- Python 3.11+
+- 已安装对应 DCC（Houdini / Maya / Blender / Substance Designer）
+- 一个 MCP 客户端（Codex / Claude Code / 其他）
+
+### 2. 启动统一面板
+
+```bash
+python run_unified_gui.py
+```
+
+或双击：
+
+```text
+启动DCC-MCP.bat
+```
+
+### 3. 在面板中检查状态
+
+对每个 DCC：
+- 自动检测环境
+- 测试 MCP 连接
+- 清理旧进程
+- 重启 MCP 服务器
+
+### 4. 配置 MCP 客户端
+
+在客户端配置里指向各桥接脚本（示例见下文 `Codex Config Example`）。
+
 ## Architecture
 
-Each DCC uses the same two-layer model:
+每个 DCC 都是两层结构：
 
 1. `*_mcp.daemon_server`  
-Persistent local backend. Owns GUI control channel and DCC session/runtime state.
+常驻本地后台，负责真实 DCC 会话与状态维护。
 
 2. `*_mcp.server_with_gui`  
-Lightweight stdio MCP bridge for `Codex`. Forwards tool calls to daemon.
+轻量 MCP bridge（stdio），将工具调用转发到 daemon。
 
-This avoids short-lived MCP subprocess issues and keeps GUI + MCP stable.
+这样可避免 GUI 与 MCP 客户端争抢同一进程。
 
 ### 中文架构图（统一面板 + 四后端）
 
@@ -85,21 +122,46 @@ flowchart LR
 - GUI + Codex can work at the same time
 - Auto daemon bootstrap when launching GUI/bridge
 - Unified control panel for all 4 DCCs
+- Pipeline-oriented MCP tools for batch/workflow/validation/publish
 
-## Main Entry Points
+## New Pipeline Tools（所有 DCC Bridge 通用）
 
-### Unified panel
+以下工具已在 Houdini / Maya / Blender / Substance 四套 bridge 中统一提供：
+
+- `workflow_run`：按步骤顺序执行工具链，支持失败即停
+- `batch_run`：批量执行操作，支持失败继续
+- `validate_asset`：资产路径/扩展名/命名规则/体积基础校验
+- `publish_asset`：发布资产到目标目录并可生成 manifest
+- `get_job_status`：查询任务状态，支持按 `job_id` 获取详细结果
+
+### workflow_run 示例
+
+```json
+{
+  "steps": [
+    {"operation": "import_geometry", "params": {"input_path": "C:/tmp/in.fbx", "output_blend": "C:/tmp/work.blend"}},
+    {"operation": "merge_by_distance", "params": {"input_blend": "C:/tmp/work.blend", "output_blend": "C:/tmp/clean.blend", "distance": 0.0001}},
+    {"operation": "export_fbx", "params": {"input_blend": "C:/tmp/clean.blend", "output_path": "C:/tmp/out.fbx"}}
+  ],
+  "stop_on_error": true,
+  "workflow_name": "blender_clean_export"
+}
+```
+
+## Run Modes
+
+### 统一面板
 - `python run_unified_gui.py`
-- `启动统一MCP面板.bat`
+- `启动DCC-MCP.bat`
 - Desktop shortcut: `DCC_MCP_Control.lnk`
 
-### Per-DCC GUI
+### 单 DCC 面板
 - Houdini: `python run_gui.py`
 - Maya: `python run_maya_gui.py`
 - Blender: `python run_blender_gui.py`
 - Substance: `python run_substance_gui.py`
 
-### MCP bridge (for Codex)
+### MCP Bridge（供客户端调用）
 - Houdini: `houdini_mcp/server_with_gui.py`
 - Maya: `maya_mcp/server_with_gui.py`
 - Blender: `blender_mcp/server_with_gui.py`
@@ -108,7 +170,7 @@ flowchart LR
 ### Verification
 - `python verify_codex_setup.py`
 
-## Runtime State
+## Runtime State（运行态文件）
 
 Daemon state files are written under:
 
@@ -122,7 +184,7 @@ Each contains:
 - `ws_port.json`
 - `ws_port_<pid>.json`
 
-## Codex Config Example
+## Codex Config Example（手动配置）
 
 ```toml
 [mcp_servers.houdini_mcp]
@@ -142,6 +204,12 @@ command = "python"
 args = ["-u", "C:/Users/wepie/dcc-mcp/substance_mcp/server_with_gui.py"]
 ```
 
+## Usage Notes
+
+- 建议优先从统一面板启动，这样会自动拉起/修复 daemon。
+- 场景文件路径建议使用绝对路径（便于跨工具联动和排错）。
+- 当前项目使用的是 `MCP 协议 + FastMCP 实现层`。
+
 ## Blender Notes
 
 Default Blender path used by launcher:
@@ -149,6 +217,19 @@ Default Blender path used by launcher:
 
 More details:
 - `BLENDER_SETUP.md`
+
+## Troubleshooting
+
+1. 客户端连不上：
+- 先开统一面板，看对应 DCC 是否显示在线。
+- 执行“测试 MCP 连接”。
+- 再检查客户端配置路径是否为 `C:/Users/wepie/dcc-mcp/...`。
+
+2. 状态异常或旧进程残留：
+- 点击“清理旧进程”后，再“重启 MCP 服务器”。
+
+3. 想做基础自检：
+- `python verify_codex_setup.py`
 
 ## Related Docs
 

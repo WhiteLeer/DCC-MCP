@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 echo ========================================
 echo Houdini MCP GUI Installation
 echo ========================================
@@ -14,7 +14,7 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 
 echo [2/3] Updating Claude Code configuration...
-python -c "import json, os; config_path = os.path.expanduser('~/AppData/Roaming/Claude/claude_desktop_config.json'); config = json.load(open(config_path)) if os.path.exists(config_path) else {'mcpServers': {}}; config['mcpServers']['houdini'] = {'command': 'C:/Program Files/Side Effects Software/Houdini 20.5.487/bin/hython.exe', 'args': ['-m', 'houdini_mcp.server_with_gui'], 'env': {'HOUDINI_PATH': 'C:/Program Files/Side Effects Software/Houdini 20.5.487/bin', 'PYTHONPATH': 'C:/Users/wepie/houdini-mcp'}}; json.dump(config, open(config_path, 'w'), indent=2)"
+python -c "import json, os; config_path = os.path.expanduser('~/AppData/Roaming/Claude/claude_desktop_config.json'); config = json.load(open(config_path)) if os.path.exists(config_path) else {'mcpServers': {}}; config['mcpServers']['houdini'] = {'command': 'C:/Program Files/Side Effects Software/Houdini 20.5.487/bin/hython.exe', 'args': ['-m', 'houdini_mcp.server_with_gui'], 'env': {'HOUDINI_PATH': 'C:/Program Files/Side Effects Software/Houdini 20.5.487/bin', 'PYTHONPATH': 'C:/Users/wepie/dcc-mcp'}}; json.dump(config, open(config_path, 'w'), indent=2)"
 if %ERRORLEVEL% NEQ 0 (
     echo WARNING: Could not update config automatically
     echo Please manually update: %USERPROFILE%\AppData\Roaming\Claude\claude_desktop_config.json
@@ -32,3 +32,4 @@ echo 3. Enjoy hot-reloadable MCP!
 echo ========================================
 echo.
 pause
+

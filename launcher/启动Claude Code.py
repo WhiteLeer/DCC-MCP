@@ -1,4 +1,4 @@
-"""
+﻿"""
 Claude Code 智能启动器
 - 普通模式：可多开
 - 每种 MCP 模式：单实例限制（通过锁文件检测）
@@ -373,3 +373,5 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = LauncherWindow(root)
     root.mainloop()
+
+

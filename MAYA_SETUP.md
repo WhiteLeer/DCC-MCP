@@ -1,4 +1,4 @@
-# Maya MCP for Codex
+﻿# Maya MCP for Codex
 
 ## Setup
 
@@ -7,11 +7,11 @@ Edit `C:/Users/wepie/.codex/config.toml`:
 ```toml
 [mcp_servers.maya_mcp]
 command = "C:/Program Files/Autodesk/Maya2026/bin/mayapy.exe"
-args = ["-u", "C:/Users/wepie/houdini-mcp/maya_mcp/server_with_gui.py"]
+args = ["-u", "C:/Users/wepie/dcc-mcp/maya_mcp/server_with_gui.py"]
 
 [mcp_servers.maya_mcp.env]
 PYTHONUNBUFFERED = "1"
-PYTHONPATH = "C:/Users/wepie/houdini-mcp"
+PYTHONPATH = "C:/Users/wepie/dcc-mcp"
 MAYA_BIN = "C:/Program Files/Autodesk/Maya2026/bin"
 ```
 
@@ -39,3 +39,4 @@ The daemon publishes discovery files here:
 - `delete_history`
 - `center_pivot`
 - `create_locator`
+

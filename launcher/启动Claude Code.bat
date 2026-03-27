@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 REM Claude Code 智能启动器
 REM 自动选择是否启用Houdini MCP
 
@@ -11,3 +11,5 @@ if errorlevel 1 (
     echo 请确保已安装Python 3.8+
     pause
 )
+
+

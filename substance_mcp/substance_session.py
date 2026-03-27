@@ -5,11 +5,13 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import shutil
 from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
 from PIL import Image
+from PIL import ImageEnhance, ImageFilter
 import psutil
 
 
@@ -34,6 +36,10 @@ class SubstanceSessionBackend:
             return self.cook_sbs(params)
         if operation == "list_outputs":
             return self.list_outputs(params)
+        if operation == "import_texture":
+            return self.import_texture(params)
+        if operation == "process_texture":
+            return self.process_texture(params)
         if operation == "analyze_image_palette":
             return self.analyze_image_palette(params)
         if operation == "harmonize_image_color":
@@ -210,6 +216,154 @@ class SubstanceSessionBackend:
             "error": None,
             "context": {"output_path": output_path, "files": files[:200]},
         }
+
+    def import_texture(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        input_path = self._require_existing_file(params.get("input_path", ""))
+        output_dir = str(params.get("output_dir", "")).strip() or str(Path(input_path).parent)
+        output_name = str(params.get("output_name", "")).strip() or Path(input_path).name
+        convert_to = str(params.get("convert_to", "")).strip().lower()
+        resize_width = int(params.get("resize_width", 0))
+        resize_height = int(params.get("resize_height", 0))
+        keep_aspect = bool(params.get("keep_aspect", True))
+
+        out_dir = Path(output_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / output_name
+        if convert_to:
+            out_path = out_path.with_suffix(f".{convert_to.lstrip('.')}")
+
+        image = Image.open(input_path)
+        if resize_width > 0 and resize_height > 0:
+            if keep_aspect:
+                image.thumbnail((resize_width, resize_height), Image.Resampling.LANCZOS)
+            else:
+                image = image.resize((resize_width, resize_height), Image.Resampling.LANCZOS)
+
+        if not convert_to and (resize_width <= 0 or resize_height <= 0):
+            shutil.copy2(input_path, out_path)
+        else:
+            save_kwargs = {}
+            if out_path.suffix.lower() in {".jpg", ".jpeg"}:
+                image = image.convert("RGB")
+                save_kwargs["quality"] = 95
+            image.save(out_path, **save_kwargs)
+
+        data = {
+            "input_path": input_path,
+            "output_path": str(out_path),
+            "size": [int(image.size[0]), int(image.size[1])],
+            "mode": image.mode,
+            "convert_to": convert_to or out_path.suffix.lstrip("."),
+            "message": f"Imported texture to {out_path}",
+        }
+        return {
+            "success": True,
+            "message": data["message"],
+            "prompt": data["message"],
+            "error": None,
+            "context": data,
+        }
+
+    def process_texture(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        input_path = self._require_existing_file(params.get("input_path", ""))
+        output_path = str(params.get("output_path", "")).strip()
+        if not output_path:
+            suffix = str(params.get("output_format", "")).strip().lower()
+            src = Path(input_path)
+            output_path = str(src.with_name(f"{src.stem}_processed{('.' + suffix) if suffix else src.suffix}"))
+
+        brightness = float(params.get("brightness", 1.0))
+        contrast = float(params.get("contrast", 1.0))
+        saturation = float(params.get("saturation", 1.0))
+        sharpness = float(params.get("sharpness", 1.0))
+        blur_radius = max(0.0, float(params.get("blur_radius", 0.0)))
+        slope_blur_intensity = max(0.0, float(params.get("slope_blur_intensity", 0.0)))
+        slope_blur_samples = max(1, int(params.get("slope_blur_samples", 8)))
+        slope_blur_blend = max(0.0, min(1.0, float(params.get("slope_blur_blend", 1.0))))
+        resize_width = int(params.get("resize_width", 0))
+        resize_height = int(params.get("resize_height", 0))
+        keep_aspect = bool(params.get("keep_aspect", True))
+
+        image = Image.open(input_path).convert("RGBA")
+        if resize_width > 0 and resize_height > 0:
+            if keep_aspect:
+                image.thumbnail((resize_width, resize_height), Image.Resampling.LANCZOS)
+            else:
+                image = image.resize((resize_width, resize_height), Image.Resampling.LANCZOS)
+
+        if abs(brightness - 1.0) > 1e-6:
+            image = ImageEnhance.Brightness(image).enhance(brightness)
+        if abs(contrast - 1.0) > 1e-6:
+            image = ImageEnhance.Contrast(image).enhance(contrast)
+        if abs(saturation - 1.0) > 1e-6:
+            image = ImageEnhance.Color(image).enhance(saturation)
+        if abs(sharpness - 1.0) > 1e-6:
+            image = ImageEnhance.Sharpness(image).enhance(sharpness)
+        if blur_radius > 0.0:
+            image = image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+        if slope_blur_intensity > 0.0:
+            image = self._apply_slope_blur(
+                image=image,
+                intensity_px=slope_blur_intensity,
+                samples=slope_blur_samples,
+                blend=slope_blur_blend,
+            )
+
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        save_kwargs = {}
+        if out_path.suffix.lower() in {".jpg", ".jpeg"}:
+            image = image.convert("RGB")
+            save_kwargs["quality"] = 95
+        image.save(out_path, **save_kwargs)
+
+        data = {
+            "input_path": input_path,
+            "output_path": str(out_path),
+            "size": [int(image.size[0]), int(image.size[1])],
+            "brightness": brightness,
+            "contrast": contrast,
+            "saturation": saturation,
+            "sharpness": sharpness,
+            "blur_radius": blur_radius,
+            "slope_blur_intensity": slope_blur_intensity,
+            "slope_blur_samples": slope_blur_samples,
+            "slope_blur_blend": slope_blur_blend,
+            "message": f"Processed texture to {out_path}",
+        }
+        return {
+            "success": True,
+            "message": data["message"],
+            "prompt": data["message"],
+            "error": None,
+            "context": data,
+        }
+
+    def _apply_slope_blur(self, image: Image.Image, intensity_px: float, samples: int, blend: float) -> Image.Image:
+        arr = np.asarray(image.convert("RGBA"), dtype=np.float32) / 255.0
+        h, w, _ = arr.shape
+        if h < 2 or w < 2:
+            return image
+
+        gray = 0.2126 * arr[:, :, 0] + 0.7152 * arr[:, :, 1] + 0.0722 * arr[:, :, 2]
+        gy, gx = np.gradient(gray)
+        mag = np.sqrt(gx * gx + gy * gy) + 1e-8
+        gx = gx / mag
+        gy = gy / mag
+
+        ys, xs = np.indices((h, w), dtype=np.float32)
+        acc = arr.copy()
+        for i in range(1, samples + 1):
+            step = (i / samples) * intensity_px
+            sample_x = np.clip(np.round(xs + gx * step), 0, w - 1).astype(np.int32)
+            sample_y = np.clip(np.round(ys + gy * step), 0, h - 1).astype(np.int32)
+            acc += arr[sample_y, sample_x]
+
+        blurred = np.clip(acc / (samples + 1), 0.0, 1.0)
+        out = arr * (1.0 - blend) + blurred * blend
+        out = np.clip(out * 255.0, 0, 255).astype(np.uint8)
+        return Image.fromarray(out, mode="RGBA")
 
     def analyze_image_palette(self, params: Dict[str, Any]) -> Dict[str, Any]:
         input_path = self._require_existing_file(params.get("input_path", ""))
