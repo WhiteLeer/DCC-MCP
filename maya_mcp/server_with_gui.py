@@ -8,6 +8,7 @@ from mcp.server.fastmcp import FastMCP
 
 from maya_mcp.daemon_client import invoke_operation
 from maya_mcp.daemon_launcher import ensure_daemon_running
+from houdini_mcp.gui.gui_launcher import ensure_unified_gui_running
 from houdini_mcp.utils.logging_config import setup_logging
 from houdini_mcp.utils.pipeline_tools import PipelineOrchestrator
 
@@ -20,6 +21,7 @@ logger = setup_logging(
 
 
 def create_server(name: str = "Maya-Bridge") -> FastMCP:
+    ensure_unified_gui_running()
     ensure_daemon_running()
     mcp = FastMCP(name=name)
     pipeline = PipelineOrchestrator("maya", invoke_operation)

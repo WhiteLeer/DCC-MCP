@@ -14,9 +14,17 @@ import os
 class LogsWidget(QWidget):
     """Logs tab."""
 
-    def __init__(self, parent=None, log_dir_prefix: str = "houdini-mcp"):
+    def __init__(
+        self,
+        parent=None,
+        log_dir_prefix: str = "houdini-mcp",
+        log_dir_prefixes: list[str] | None = None,
+        compact: bool = False,
+    ):
         super().__init__(parent)
         self._log_dir_prefix = log_dir_prefix
+        self._log_dir_prefixes = log_dir_prefixes
+        self._compact = compact
         self._entries: list[dict] = []
 
         self._init_ui()
@@ -24,56 +32,78 @@ class LogsWidget(QWidget):
     def _init_ui(self):
         """Initialize UI."""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
-        layout.setSpacing(10)
+        if self._compact:
+            layout.setContentsMargins(6, 6, 6, 6)
+            layout.setSpacing(6)
+        else:
+            layout.setContentsMargins(15, 15, 15, 15)
+            layout.setSpacing(10)
 
-        # Header
-        header_layout = QHBoxLayout()
+        if not self._compact:
+            # Header
+            header_layout = QHBoxLayout()
 
-        title = QLabel("📝 服务器日志")
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title.setFont(title_font)
-        header_layout.addWidget(title)
+            title = QLabel("📝 服务器日志")
+            title_font = QFont()
+            title_font.setPointSize(14)
+            title_font.setBold(True)
+            title.setFont(title_font)
+            header_layout.addWidget(title)
 
-        header_layout.addStretch()
+            header_layout.addStretch()
 
-        # Level filter
-        header_layout.addWidget(QLabel("级别:"))
-        self.level_combo = QComboBox()
-        self.level_combo.addItems(["全部", "DEBUG", "INFO", "WARNING", "ERROR"])
-        header_layout.addWidget(self.level_combo)
+            # Level filter
+            header_layout.addWidget(QLabel("级别:"))
+            self.level_combo = QComboBox()
+            self.level_combo.addItems(["全部", "DEBUG", "INFO", "WARNING", "ERROR"])
+            header_layout.addWidget(self.level_combo)
 
-        # Search
-        header_layout.addWidget(QLabel("搜索:"))
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("搜索日志...")
-        self.search_input.setMaximumWidth(200)
-        header_layout.addWidget(self.search_input)
+            # Search
+            header_layout.addWidget(QLabel("搜索:"))
+            self.search_input = QLineEdit()
+            self.search_input.setPlaceholderText("搜索日志...")
+            self.search_input.setMaximumWidth(200)
+            header_layout.addWidget(self.search_input)
 
-        # Clear button
-        clear_btn = QPushButton("🗑️ 清空日志")
-        clear_btn.clicked.connect(self._clear_logs)
-        header_layout.addWidget(clear_btn)
+            # Clear button
+            clear_btn = QPushButton("🗑️ 清空日志")
+            clear_btn.clicked.connect(self._clear_logs)
+            header_layout.addWidget(clear_btn)
 
-        layout.addLayout(header_layout)
+            layout.addLayout(header_layout)
+        else:
+            self.level_combo = None
+            self.search_input = None
 
         # Log text area
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #fcfcfd;
-                color: #17202a;
-                border: 1px solid #cfd6df;
-                border-radius: 6px;
-                font-family: 'Consolas', 'Courier New', monospace;
-                font-size: 12px;
-                selection-background-color: #cfe8ff;
-                selection-color: #0f172a;
-            }
-        """)
+        if self._compact:
+            self.log_text.setStyleSheet("""
+                QTextEdit {
+                    background-color: #ffffff;
+                    color: #1f2933;
+                    border: 1px solid #d6dde6;
+                    border-radius: 8px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 12px;
+                    selection-background-color: #d7e3ff;
+                    selection-color: #1f2933;
+                }
+            """)
+        else:
+            self.log_text.setStyleSheet("""
+                QTextEdit {
+                    background-color: #fcfcfd;
+                    color: #17202a;
+                    border: 1px solid #cfd6df;
+                    border-radius: 6px;
+                    font-family: 'Consolas', 'Courier New', monospace;
+                    font-size: 12px;
+                    selection-background-color: #cfe8ff;
+                    selection-color: #0f172a;
+                }
+            """)
 
         # Use monospace font
         font = QFont("Consolas", 10)
@@ -82,22 +112,26 @@ class LogsWidget(QWidget):
         layout.addWidget(self.log_text)
 
         # Auto-scroll checkbox
-        footer_layout = QHBoxLayout()
-        footer_layout.addStretch()
-
         self.auto_scroll = True
-        auto_scroll_btn = QPushButton("⬇ 自动滚动: 开")
-        auto_scroll_btn.setCheckable(True)
-        auto_scroll_btn.setChecked(True)
-        auto_scroll_btn.clicked.connect(self._toggle_auto_scroll)
-        footer_layout.addWidget(auto_scroll_btn)
+        if not self._compact:
+            footer_layout = QHBoxLayout()
+            footer_layout.addStretch()
 
-        self.auto_scroll_btn = auto_scroll_btn
+            auto_scroll_btn = QPushButton("⬇ 自动滚动: 开")
+            auto_scroll_btn.setCheckable(True)
+            auto_scroll_btn.setChecked(True)
+            auto_scroll_btn.clicked.connect(self._toggle_auto_scroll)
+            footer_layout.addWidget(auto_scroll_btn)
 
-        layout.addLayout(footer_layout)
+            self.auto_scroll_btn = auto_scroll_btn
+            layout.addLayout(footer_layout)
+        else:
+            self.auto_scroll_btn = None
 
-        self.level_combo.currentTextChanged.connect(self._render_logs)
-        self.search_input.textChanged.connect(self._render_logs)
+        if self.level_combo is not None:
+            self.level_combo.currentTextChanged.connect(self._render_logs)
+        if self.search_input is not None:
+            self.search_input.textChanged.connect(self._render_logs)
 
     def add_log(self, log_data: dict):
         """Add log message.
@@ -115,6 +149,9 @@ class LogsWidget(QWidget):
         self._entries = self._entries[-5000:]
         self._render_logs()
 
+    def set_log_prefixes(self, prefixes: list[str]) -> None:
+        self._log_dir_prefixes = prefixes
+
     def _clear_logs(self):
         """Clear all logs."""
         self.log_text.clear()
@@ -131,25 +168,26 @@ class LogsWidget(QWidget):
         """Load recent daemon/bridge/gui logs from disk."""
         self._entries.clear()
         log_root = Path.home() / ".mcp_logs"
-        prefix = self._log_dir_prefix
-        targets = [
-            ("daemon", log_root / f"{prefix}-daemon" / f"{prefix}-daemon_latest.log"),
-            ("bridge", log_root / f"{prefix}-bridge" / f"{prefix}-bridge_latest.log"),
-            ("gui", log_root / f"{prefix}-gui" / f"{prefix}-gui_latest.log"),
-        ]
+        prefixes = self._log_dir_prefixes or [self._log_dir_prefix]
 
-        for source, path in targets:
-            if not path.exists():
-                continue
+        for prefix in prefixes:
+            for kind in ("daemon", "bridge", "gui"):
+                logger_name = f"{prefix}-{kind}"
+                log_dir = log_root / logger_name
+                path = self._pick_log_file(log_dir, logger_name)
+                if not path:
+                    continue
 
-            try:
-                lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()[-200:]
-            except OSError:
-                continue
+                try:
+                    lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()[-400:]
+                except OSError:
+                    continue
 
-            for line in lines:
-                self._entries.append(self._parse_log_line(line, source))
+                source = f"{prefix}:{kind}"
+                for line in lines:
+                    self._entries.append(self._parse_log_line(line, source))
 
+        self._entries.sort(key=self._entry_sort_key)
         self._entries = self._entries[-5000:]
         self._render_logs()
 
@@ -171,9 +209,38 @@ class LogsWidget(QWidget):
             "source": source,
         }
 
+    def _pick_log_file(self, log_dir: Path, logger_name: str) -> Path | None:
+        if not log_dir.exists():
+            return None
+        latest = log_dir / f"{logger_name}_latest.log"
+        if latest.exists():
+            try:
+                if latest.stat().st_size > 0:
+                    return latest
+            except OSError:
+                pass
+        candidates = sorted(
+            log_dir.glob(f"{logger_name}_*.log"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for candidate in candidates:
+            if candidate.name.endswith("_latest.log"):
+                continue
+            return candidate
+        return latest if latest.exists() else None
+
+    def _entry_sort_key(self, entry: dict) -> float:
+        timestamp = entry.get("timestamp", "")
+        try:
+            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            return dt.timestamp()
+        except Exception:
+            return 0.0
+
     def _render_logs(self):
-        level_filter = self.level_combo.currentText()
-        search_text = self.search_input.text().strip().lower()
+        level_filter = self.level_combo.currentText() if self.level_combo else "全部"
+        search_text = self.search_input.text().strip().lower() if self.search_input else ""
 
         self.log_text.clear()
         for entry in self._entries:
@@ -212,4 +279,4 @@ class LogsWidget(QWidget):
             return "#b9770e"
         if level == "DEBUG":
             return "#566573"
-        return "#17202a"
+        return "#1f2933"
