@@ -36,8 +36,30 @@ class HoudiniSessionBackend:
     async def execute(self, operation: str, params: Dict[str, Any]) -> Dict[str, Any]:
         if operation == "get_scene_state":
             return self.get_scene_state()
+        if operation == "get_template_catalog":
+            return self.get_template_catalog(params)
+        if operation == "plan_hda_from_prompt":
+            return self.plan_hda_from_prompt(params)
+        if operation == "build_hda_from_prompt":
+            return self.build_hda_from_prompt(params)
+        if operation == "build_hda_from_template":
+            return self.build_hda_from_template(params)
+        if operation == "repair_graph":
+            return self.repair_graph(params)
+        if operation == "generate_hda_ui":
+            return self.generate_hda_ui(params)
+        if operation == "get_node_graph_summary":
+            return self.get_node_graph_summary(params)
         if operation == "create_box":
             return self.create_box(params)
+        if operation == "instantiate_template":
+            return self.instantiate_template(params)
+        if operation == "validate_graph":
+            return self.validate_graph(params)
+        if operation == "validate_params":
+            return self.validate_params(params)
+        if operation == "dry_run_cook":
+            return self.dry_run_cook(params)
         if operation == "clean_mesh":
             return self.clean_mesh(params)
         if operation == "cleanup_attributes":
@@ -97,6 +119,573 @@ class HoudiniSessionBackend:
                 "nodes": nodes,
                 "node_count": len(nodes),
                 "running": True,
+            },
+        }
+
+    def get_template_catalog(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        include_schema = bool(params.get("include_schema", True))
+        templates = {
+            "single_building_v1": {
+                "description": "Single procedural building with roof peak.",
+                "category": "building",
+                "defaults": {"width": 8.0, "height": 12.0, "depth": 8.0, "roof_scale": 1.15, "roof_height": 3.0},
+                "schema": {
+                    "width": {"type": "float", "min": 1.0, "max": 50.0},
+                    "height": {"type": "float", "min": 1.0, "max": 80.0},
+                    "depth": {"type": "float", "min": 1.0, "max": 50.0},
+                    "roof_scale": {"type": "float", "min": 0.5, "max": 3.0},
+                    "roof_height": {"type": "float", "min": 0.2, "max": 20.0},
+                },
+            },
+            "road_segment_v1": {
+                "description": "Road segment with configurable subdivision and subtle crown.",
+                "category": "road",
+                "defaults": {"length": 30.0, "width": 6.0, "rows": 8, "cols": 16, "curb_height": 0.15},
+                "schema": {
+                    "length": {"type": "float", "min": 2.0, "max": 2000.0},
+                    "width": {"type": "float", "min": 0.5, "max": 100.0},
+                    "rows": {"type": "int", "min": 2, "max": 256},
+                    "cols": {"type": "int", "min": 2, "max": 2048},
+                    "curb_height": {"type": "float", "min": -1.0, "max": 2.0},
+                },
+            },
+            "town_block_v1": {
+                "description": "Procedural town block with roads and scattered buildings.",
+                "category": "town",
+                "defaults": {
+                    "block_size": 120.0,
+                    "road_width": 10.0,
+                    "road_mode": 1,
+                    "road_curve_path": "",
+                    "building_density": 0.35,
+                    "min_height": 6.0,
+                    "max_height": 24.0,
+                    "min_footprint": 2.0,
+                    "max_footprint": 6.0,
+                    "seed": 0,
+                },
+                "schema": {
+                    "block_size": {"type": "float", "min": 20.0, "max": 2000.0},
+                    "road_width": {"type": "float", "min": 1.0, "max": 200.0},
+                    "road_mode": {"type": "int", "min": 0, "max": 2},
+                    "road_curve_path": {"type": "string"},
+                    "building_density": {"type": "float", "min": 0.01, "max": 1.0},
+                    "min_height": {"type": "float", "min": 1.0, "max": 200.0},
+                    "max_height": {"type": "float", "min": 1.0, "max": 400.0},
+                    "min_footprint": {"type": "float", "min": 0.5, "max": 30.0},
+                    "max_footprint": {"type": "float", "min": 0.5, "max": 60.0},
+                    "seed": {"type": "int", "min": 0, "max": 100000},
+                },
+            },
+        }
+        if not include_schema:
+            for item in templates.values():
+                item.pop("schema", None)
+        return {
+            "success": True,
+            "message": "Template catalog fetched",
+            "error": None,
+            "context": {"templates": templates},
+        }
+
+    def plan_hda_from_prompt(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = str(params.get("prompt", "")).strip()
+        if not prompt:
+            raise RuntimeError("prompt is required")
+
+        text = prompt.lower()
+        template_id = "single_building_v1"
+        overrides: Dict[str, Any] = {}
+        suggested_name = "generated_building"
+
+        if any(token in text for token in ("town", "city", "block", "district", "城镇", "城市", "街区", "小镇")):
+            template_id = "town_block_v1"
+            suggested_name = "generated_town"
+        elif any(token in text for token in ("road", "street", "path", "lane", "道路", "马路", "街道", "路段")):
+            template_id = "road_segment_v1"
+            suggested_name = "generated_road"
+        elif any(token in text for token in ("building", "house", "tower", "architecture", "建筑", "房子", "楼", "塔")):
+            template_id = "single_building_v1"
+            suggested_name = "generated_building"
+
+        numbers = re.findall(r"\d+(?:\.\d+)?", text)
+        if template_id == "single_building_v1":
+            if len(numbers) >= 1:
+                overrides["width"] = float(numbers[0])
+            if len(numbers) >= 2:
+                overrides["height"] = float(numbers[1])
+            if len(numbers) >= 3:
+                overrides["depth"] = float(numbers[2])
+        elif template_id == "road_segment_v1":
+            if len(numbers) >= 1:
+                overrides["length"] = float(numbers[0])
+            if len(numbers) >= 2:
+                overrides["width"] = float(numbers[1])
+        else:
+            if len(numbers) >= 1:
+                overrides["block_size"] = float(numbers[0])
+            if len(numbers) >= 2:
+                overrides["road_width"] = float(numbers[1])
+            if any(token in text for token in ("curve", "spline", "bezier", "曲线", "弯路")):
+                overrides["road_mode"] = 1
+            if any(token in text for token in ("cross", "grid", "十字", "网格")):
+                overrides["road_mode"] = 0
+
+        data = {
+            "prompt": prompt,
+            "template_id": template_id,
+            "node_name": suggested_name,
+            "overrides": overrides,
+            "notes": ["heuristic_parser_v1"],
+        }
+        return {"success": True, "message": "Plan created from prompt", "error": None, "context": data}
+
+    def build_hda_from_prompt(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        plan_result = self.plan_hda_from_prompt(params)
+        plan = plan_result["context"]
+        build_params = {
+            "template_id": plan["template_id"],
+            "parent_path": str(params.get("parent_path", "/obj")).strip() or "/obj",
+            "node_name": str(params.get("node_name", "")).strip() or plan["node_name"],
+            "overrides": plan["overrides"],
+            "asset_name": str(params.get("asset_name", "")).strip(),
+            "asset_label": str(params.get("asset_label", "")).strip(),
+            "hda_file_path": str(params.get("hda_file_path", "")).strip(),
+            "version": str(params.get("version", "")).strip(),
+            "save_as_embedded": bool(params.get("save_as_embedded", False)),
+            "ignore_validation_errors": bool(params.get("ignore_validation_errors", False)),
+        }
+        result = self.build_hda_from_template(build_params)
+        result_context = result.get("context", {})
+        result_context["plan"] = plan
+        result["context"] = result_context
+        return result
+
+    def build_hda_from_template(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        template_id = str(params.get("template_id", "")).strip().lower()
+        parent_path = str(params.get("parent_path", "/obj")).strip() or "/obj"
+        node_name = str(params.get("node_name", "")).strip()
+        overrides = params.get("overrides") or {}
+        ignore_validation_errors = bool(params.get("ignore_validation_errors", False))
+
+        inst = self.instantiate_template(
+            {
+                "template_id": template_id,
+                "parent_path": parent_path,
+                "node_name": node_name,
+                "overrides": overrides,
+            }
+        )
+        root_path = inst.get("context", {}).get("root_node_path", "")
+        if not root_path:
+            raise RuntimeError("Template instantiation did not return root_node_path")
+
+        v_params = self.validate_params({"root_path": root_path, "schema_id": template_id})
+        v_graph = self.validate_graph({"root_path": root_path})
+        dry = self.dry_run_cook({"root_path": root_path})
+
+        repair_result = None
+        if not bool(v_graph.get("success")):
+            repair_result = self.repair_graph({"root_path": root_path})
+            v_graph = self.validate_graph({"root_path": root_path})
+            if bool(v_graph.get("success")) and not bool(dry.get("success")):
+                dry = self.dry_run_cook({"root_path": root_path})
+
+        validation_ok = bool(v_params.get("success")) and bool(v_graph.get("success")) and bool(dry.get("success"))
+        if not validation_ok and not ignore_validation_errors:
+            return {
+                "success": False,
+                "message": "Build aborted due to validation failure",
+                "error": "validation_failed",
+                "context": {
+                    "root_node_path": root_path,
+                    "validate_params": v_params,
+                    "validate_graph": v_graph,
+                    "dry_run_cook": dry,
+                    "repair_graph": repair_result,
+                },
+            }
+
+        default_asset_name = f"mcp_{self._sanitize_node_name(node_name or template_id)}"
+        create_hda = self.create_hda_from_selection(
+            {
+                "asset_name": params.get("asset_name") or default_asset_name,
+                "asset_label": params.get("asset_label") or default_asset_name.replace("_", " ").title(),
+                "node_paths": [root_path],
+                "hda_file_path": params.get("hda_file_path", ""),
+                "version": params.get("version", ""),
+                "save_as_embedded": bool(params.get("save_as_embedded", False)),
+            }
+        )
+        if not create_hda.get("success"):
+            return create_hda
+
+        data = {
+            "template_id": template_id,
+            "root_node_path": root_path,
+            "instantiate": inst,
+            "validate_params": v_params,
+            "validate_graph": v_graph,
+            "dry_run_cook": dry,
+            "repair_graph": repair_result,
+            "hda": create_hda.get("context", {}),
+        }
+        return {"success": True, "message": "HDA built from template", "error": None, "context": data}
+
+    def repair_graph(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        root_path = str(params.get("root_path", "")).strip()
+        if not root_path:
+            raise RuntimeError("root_path is required")
+        root = self.hou.node(root_path)
+        if root is None:
+            raise RuntimeError(f"Root node not found: {root_path}")
+
+        actions: list[str] = []
+        warnings: list[str] = []
+
+        if root.type().category().name() == "Object":
+            display = root.displayNode()
+            out = root.node("OUT")
+            if out is None and display is not None:
+                out = root.createNode("null", "OUT")
+                out.setInput(0, display)
+                actions.append("created_OUT_node")
+
+            if out is not None:
+                if not out.isDisplayFlagSet():
+                    out.setDisplayFlag(True)
+                    actions.append("set_OUT_display_flag")
+                if hasattr(out, "setRenderFlag") and not out.isRenderFlagSet():
+                    out.setRenderFlag(True)
+                    actions.append("set_OUT_render_flag")
+            else:
+                warnings.append("no_display_node_to_attach_OUT")
+
+            root.layoutChildren()
+        else:
+            if hasattr(root, "setDisplayFlag") and not root.isDisplayFlagSet():
+                root.setDisplayFlag(True)
+                actions.append("set_display_flag")
+            if hasattr(root, "setRenderFlag") and not root.isRenderFlagSet():
+                root.setRenderFlag(True)
+                actions.append("set_render_flag")
+
+        return {
+            "success": True,
+            "message": "Graph repair completed",
+            "error": None,
+            "context": {"root_path": root_path, "actions": actions, "warnings": warnings},
+        }
+
+    def generate_hda_ui(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        root_path = str(params.get("root_path", "")).strip()
+        if not root_path:
+            raise RuntimeError("root_path is required")
+        root = self.hou.node(root_path)
+        if root is None:
+            raise RuntimeError(f"Root node not found: {root_path}")
+
+        schema_id = str(params.get("schema_id", "")).strip().lower()
+        if not schema_id:
+            schema_id = str(root.userData("mcp_template_id") or "").lower()
+
+        if schema_id == "single_building_v1":
+            self._setup_building_controls(root)
+            exposed = ["width", "height", "depth", "roof_scale", "roof_height", "seed"]
+        elif schema_id == "road_segment_v1":
+            self._setup_road_controls(root)
+            exposed = ["length", "width", "rows", "cols", "curb_height", "seed"]
+        elif schema_id == "town_block_v1":
+            self._setup_town_controls(root)
+            exposed = [
+                "block_size",
+                "road_width",
+                "road_mode",
+                "road_curve_path",
+                "building_density",
+                "min_height",
+                "max_height",
+                "min_footprint",
+                "max_footprint",
+                "seed",
+            ]
+        else:
+            return {
+                "success": False,
+                "message": "Unsupported schema for UI generation",
+                "error": f"unsupported_schema:{schema_id}",
+                "context": {"root_path": root_path, "schema_id": schema_id},
+            }
+
+        return {
+            "success": True,
+            "message": "Generated HDA UI controls",
+            "error": None,
+            "context": {"root_path": root_path, "schema_id": schema_id, "exposed_params": exposed},
+        }
+
+    def get_node_graph_summary(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        root_path = str(params.get("root_path", "/obj")).strip() or "/obj"
+        max_depth = max(1, int(params.get("max_depth", 2)))
+        max_children = max(1, int(params.get("max_children", 50)))
+
+        root = self.hou.node(root_path)
+        if root is None:
+            raise RuntimeError(f"Root node not found: {root_path}")
+
+        def _walk(node, depth: int):
+            item = {
+                "path": node.path(),
+                "name": node.name(),
+                "type": node.type().name(),
+                "is_bypassed": bool(node.isBypassed()) if hasattr(node, "isBypassed") else False,
+                "has_error": bool(node.errors()) if hasattr(node, "errors") else False,
+                "has_warning": bool(node.warnings()) if hasattr(node, "warnings") else False,
+                "children": [],
+            }
+            if depth >= max_depth:
+                return item
+            children = node.children()[:max_children]
+            item["children"] = [_walk(child, depth + 1) for child in children]
+            return item
+
+        graph = _walk(root, 0)
+        data = {
+            "root_path": root.path(),
+            "max_depth": max_depth,
+            "max_children": max_children,
+            "graph": graph,
+        }
+        return {"success": True, "message": f"Collected graph summary for {root.path()}", "error": None, "context": data}
+
+    def instantiate_template(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        template_id = str(params.get("template_id", "")).strip().lower()
+        if not template_id:
+            raise RuntimeError("template_id is required")
+        parent_path = str(params.get("parent_path", "/obj")).strip() or "/obj"
+        node_name = str(params.get("node_name", "")).strip()
+        overrides = params.get("overrides") or {}
+        if not isinstance(overrides, dict):
+            raise RuntimeError("overrides must be a dict")
+
+        parent = self.hou.node(parent_path)
+        if parent is None:
+            raise RuntimeError(f"Parent node not found: {parent_path}")
+
+        if template_id == "single_building_v1":
+            result = self._build_template_single_building_v1(parent, node_name, overrides)
+        elif template_id == "road_segment_v1":
+            result = self._build_template_road_segment_v1(parent, node_name, overrides)
+        elif template_id == "town_block_v1":
+            result = self._build_template_town_block_v1(parent, node_name, overrides)
+        else:
+            raise RuntimeError(f"Unsupported template_id: {template_id}")
+
+        return {
+            "success": True,
+            "message": f"Instantiated template {template_id}",
+            "error": None,
+            "context": result,
+        }
+
+    def validate_graph(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        root_path = str(params.get("root_path", "")).strip()
+        if not root_path:
+            raise RuntimeError("root_path is required")
+        root = self.hou.node(root_path)
+        if root is None:
+            raise RuntimeError(f"Root node not found: {root_path}")
+
+        errors: list[str] = []
+        warnings: list[str] = []
+        checks: dict[str, Any] = {
+            "root_exists": True,
+            "root_type": root.type().name(),
+            "has_out_node": False,
+            "has_display_node": False,
+            "cook_ok": False,
+        }
+
+        display_node = None
+        if root.type().category().name() == "Object":
+            display_node = root.displayNode()
+            checks["has_display_node"] = display_node is not None
+            out_node = root.node("OUT")
+            checks["has_out_node"] = out_node is not None
+            if out_node is None:
+                warnings.append("missing_OUT_node")
+        else:
+            display_node = root
+            checks["has_display_node"] = True
+
+        for node in root.allSubChildren() if hasattr(root, "allSubChildren") else []:
+            try:
+                if node.errors():
+                    errors.append(f"node_error:{node.path()}:{';'.join(node.errors())}")
+                if node.warnings():
+                    warnings.append(f"node_warning:{node.path()}:{';'.join(node.warnings())}")
+            except Exception:
+                pass
+
+        if display_node is None:
+            errors.append("missing_display_node")
+        else:
+            try:
+                display_node.cook(force=True)
+                checks["cook_ok"] = True
+            except Exception as e:
+                errors.append(f"cook_failed:{type(e).__name__}:{e}")
+
+        return {
+            "success": len(errors) == 0,
+            "message": "Graph validation completed",
+            "error": None if len(errors) == 0 else "Graph validation failed",
+            "context": {"checks": checks, "errors": errors, "warnings": warnings},
+        }
+
+    def validate_params(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        root_path = str(params.get("root_path", "")).strip()
+        schema_id = str(params.get("schema_id", "")).strip().lower()
+        if not root_path:
+            raise RuntimeError("root_path is required")
+        root = self.hou.node(root_path)
+        if root is None:
+            raise RuntimeError(f"Root node not found: {root_path}")
+
+        if not schema_id:
+            schema_id = str(root.userData("mcp_template_id") or "").lower()
+
+        errors: list[str] = []
+        warnings: list[str] = []
+        values: dict[str, Any] = {}
+
+        if schema_id == "single_building_v1":
+            box = root.node("base_box")
+            roof_xform = root.node("roof_xform")
+            if box is None or roof_xform is None:
+                errors.append("missing_template_nodes")
+            else:
+                sx = float(box.parm("sizex").eval())
+                sy = float(box.parm("sizey").eval())
+                sz = float(box.parm("sizez").eval())
+                roof_scale = float(roof_xform.parm("sx").eval())
+                values = {"width": sx, "height": sy, "depth": sz, "roof_scale": roof_scale}
+                if not (1.0 <= sx <= 50.0):
+                    errors.append("width_out_of_range")
+                if not (1.0 <= sy <= 80.0):
+                    errors.append("height_out_of_range")
+                if not (1.0 <= sz <= 50.0):
+                    errors.append("depth_out_of_range")
+                if not (0.5 <= roof_scale <= 3.0):
+                    errors.append("roof_scale_out_of_range")
+
+        elif schema_id == "road_segment_v1":
+            road = root.node("road_grid")
+            if road is None:
+                errors.append("missing_template_nodes")
+            else:
+                length = float(road.parm("sizex").eval())
+                width = float(road.parm("sizey").eval())
+                rows = int(road.parm("rows").eval())
+                cols = int(road.parm("cols").eval())
+                values = {"length": length, "width": width, "rows": rows, "cols": cols}
+                if not (2.0 <= length <= 2000.0):
+                    errors.append("length_out_of_range")
+                if not (0.5 <= width <= 100.0):
+                    errors.append("width_out_of_range")
+                if rows < 2:
+                    warnings.append("rows_too_low")
+                if cols < 2:
+                    warnings.append("cols_too_low")
+        elif schema_id == "town_block_v1":
+            ground = root.node("ground_grid")
+            if ground is None:
+                errors.append("missing_template_nodes")
+            else:
+                block_size = float(root.parm("block_size").eval()) if root.parm("block_size") else float(ground.parm("sizex").eval())
+                road_width = float(root.parm("road_width").eval()) if root.parm("road_width") else 0.0
+                road_mode = int(root.parm("road_mode").eval()) if root.parm("road_mode") else 1
+                road_curve_path = str(root.parm("road_curve_path").eval()) if root.parm("road_curve_path") else ""
+                density = float(root.parm("building_density").eval()) if root.parm("building_density") else 0.0
+                min_h = float(root.parm("min_height").eval()) if root.parm("min_height") else 0.0
+                max_h = float(root.parm("max_height").eval()) if root.parm("max_height") else 0.0
+                min_f = float(root.parm("min_footprint").eval()) if root.parm("min_footprint") else 0.0
+                max_f = float(root.parm("max_footprint").eval()) if root.parm("max_footprint") else 0.0
+                values = {
+                    "block_size": block_size,
+                    "road_width": road_width,
+                    "road_mode": road_mode,
+                    "road_curve_path": road_curve_path,
+                    "building_density": density,
+                    "min_height": min_h,
+                    "max_height": max_h,
+                    "min_footprint": min_f,
+                    "max_footprint": max_f,
+                }
+                if not (20.0 <= block_size <= 2000.0):
+                    errors.append("block_size_out_of_range")
+                if not (1.0 <= road_width <= 200.0):
+                    errors.append("road_width_out_of_range")
+                if road_width >= block_size:
+                    errors.append("road_width_must_be_less_than_block_size")
+                if not (0 <= road_mode <= 2):
+                    errors.append("road_mode_out_of_range")
+                if not (0.01 <= density <= 1.0):
+                    errors.append("building_density_out_of_range")
+                if min_h > max_h:
+                    errors.append("height_range_invalid")
+                if min_f > max_f:
+                    errors.append("footprint_range_invalid")
+        else:
+            warnings.append(f"unknown_schema:{schema_id}")
+
+        return {
+            "success": len(errors) == 0,
+            "message": "Parameter validation completed",
+            "error": None if len(errors) == 0 else "Parameter validation failed",
+            "context": {"schema_id": schema_id, "values": values, "errors": errors, "warnings": warnings},
+        }
+
+    def dry_run_cook(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        root_path = str(params.get("root_path", "")).strip()
+        if not root_path:
+            raise RuntimeError("root_path is required")
+        root = self.hou.node(root_path)
+        if root is None:
+            raise RuntimeError(f"Root node not found: {root_path}")
+
+        if root.type().category().name() == "Object":
+            target = root.displayNode()
+            if target is None:
+                raise RuntimeError(f"No display node found in {root_path}")
+        else:
+            target = root
+
+        diagnostics: list[str] = []
+        try:
+            target.cook(force=True)
+            geo = target.geometry()
+            poly_count = len(geo.prims()) if geo else 0
+            point_count = len(geo.points()) if geo else 0
+        except Exception as e:
+            diagnostics.append(f"cook_failed:{type(e).__name__}:{e}")
+            return {
+                "success": False,
+                "message": "Dry run cook failed",
+                "error": "Dry run cook failed",
+                "context": {"root_path": root_path, "target_path": target.path(), "diagnostics": diagnostics},
+            }
+
+        return {
+            "success": True,
+            "message": "Dry run cook passed",
+            "error": None,
+            "context": {
+                "root_path": root_path,
+                "target_path": target.path(),
+                "poly_count": poly_count,
+                "point_count": point_count,
+                "diagnostics": diagnostics,
             },
         }
 
@@ -438,6 +1027,21 @@ class HoudiniSessionBackend:
         )
 
         definition = hda_node.type().definition()
+        template_id = str(hda_node.userData("mcp_template_id") or asset_source.userData("mcp_template_id") or "").lower()
+        if template_id == "single_building_v1":
+            self._setup_building_controls(hda_node)
+        elif template_id == "road_segment_v1":
+            self._setup_road_controls(hda_node)
+        elif template_id == "town_block_v1":
+            self._setup_town_controls(hda_node)
+
+        if definition is not None:
+            try:
+                definition.setParmTemplateGroup(hda_node.parmTemplateGroup())
+            except Exception:
+                # Keep HDA creation robust even when parm template write-back is not supported.
+                pass
+
         data = {
             "node_path": hda_node.path(),
             "asset_name": asset_name,
@@ -971,6 +1575,472 @@ class HoudiniSessionBackend:
         if "embed_media" not in export_params:
             export_params["embed_media"] = True
         return self.export_geometry(export_params)
+
+    def _setup_building_controls(self, geo) -> None:
+        if geo.parm("width") and geo.parm("height") and geo.parm("depth"):
+            return
+        ptg = geo.parmTemplateGroup()
+
+        controls_folder = self.hou.FolderParmTemplate("mcp_shape", "MCP Shape")
+        controls_folder.addParmTemplate(self.hou.FloatParmTemplate("width", "Width", 1, default_value=(8.0,), min=1.0, max=50.0))
+        controls_folder.addParmTemplate(self.hou.FloatParmTemplate("height", "Height", 1, default_value=(12.0,), min=1.0, max=80.0))
+        controls_folder.addParmTemplate(self.hou.FloatParmTemplate("depth", "Depth", 1, default_value=(8.0,), min=1.0, max=50.0))
+        controls_folder.addParmTemplate(self.hou.FloatParmTemplate("roof_scale", "Roof Scale", 1, default_value=(1.15,), min=0.5, max=3.0))
+        controls_folder.addParmTemplate(self.hou.FloatParmTemplate("roof_height", "Roof Height", 1, default_value=(3.0,), min=0.2, max=20.0))
+        controls_folder.addParmTemplate(self.hou.IntParmTemplate("seed", "Seed", 1, default_value=(0,), min=0, max=100000))
+        ptg.append(controls_folder)
+        geo.setParmTemplateGroup(ptg)
+
+        base = geo.node("base_box")
+        base_xf = geo.node("base_xform")
+        roof = geo.node("roof_peak")
+        roof_xf = geo.node("roof_xform")
+
+        if base:
+            base.parm("sizex").setExpression('ch("../width")')
+            base.parm("sizey").setExpression('ch("../height")')
+            base.parm("sizez").setExpression('ch("../depth")')
+        if base_xf:
+            base_xf.parm("ty").setExpression('ch("../height")*0.5')
+        if roof:
+            roof.parm("height").setExpression('ch("../roof_height")')
+            roof.parm("rad1").setExpression('max(ch("../width"), ch("../depth"))*0.4')
+        if roof_xf:
+            roof_xf.parm("sx").setExpression('ch("../roof_scale")')
+            roof_xf.parm("sz").setExpression('ch("../roof_scale")')
+            roof_xf.parm("ty").setExpression('ch("../height")+ch("../roof_height")*0.5')
+
+    def _setup_road_controls(self, geo) -> None:
+        if geo.parm("length") and geo.parm("width") and geo.parm("rows") and geo.parm("cols"):
+            return
+        ptg = geo.parmTemplateGroup()
+
+        controls_folder = self.hou.FolderParmTemplate("mcp_shape", "MCP Shape")
+        controls_folder.addParmTemplate(self.hou.FloatParmTemplate("length", "Length", 1, default_value=(30.0,), min=2.0, max=2000.0))
+        controls_folder.addParmTemplate(self.hou.FloatParmTemplate("width", "Width", 1, default_value=(6.0,), min=0.5, max=100.0))
+        controls_folder.addParmTemplate(self.hou.IntParmTemplate("rows", "Rows", 1, default_value=(8,), min=2, max=256))
+        controls_folder.addParmTemplate(self.hou.IntParmTemplate("cols", "Cols", 1, default_value=(16,), min=2, max=2048))
+        controls_folder.addParmTemplate(self.hou.FloatParmTemplate("curb_height", "Curb Height", 1, default_value=(0.15,), min=-1.0, max=2.0))
+        controls_folder.addParmTemplate(self.hou.IntParmTemplate("seed", "Seed", 1, default_value=(0,), min=0, max=100000))
+        ptg.append(controls_folder)
+        geo.setParmTemplateGroup(ptg)
+
+        road = geo.node("road_grid")
+        peak = geo.node("road_crown")
+
+        if road:
+            road.parm("sizex").setExpression('ch("../length")')
+            road.parm("sizey").setExpression('ch("../width")')
+            road.parm("rows").setExpression('ch("../rows")')
+            road.parm("cols").setExpression('ch("../cols")')
+        if peak:
+            peak.parm("dist").setExpression('ch("../curb_height")')
+
+    def _setup_town_controls(self, geo) -> None:
+        if geo.parm("block_size") and geo.parm("road_width") and geo.parm("building_density"):
+            return
+        ptg = geo.parmTemplateGroup()
+
+        controls_folder = self.hou.FolderParmTemplate("mcp_town", "MCP Town")
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate("block_size", "Block Size", 1, default_value=(120.0,), min=20.0, max=2000.0)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate("road_width", "Road Width", 1, default_value=(10.0,), min=1.0, max=200.0)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.IntParmTemplate(
+                "road_mode",
+                "Road Mode (0 Cross, 1 Curve, 2 Both)",
+                1,
+                default_value=(1,),
+                min=0,
+                max=2,
+            )
+        )
+        curve_ref_template = self.hou.StringParmTemplate(
+            "road_curve_path",
+            "Road Curve SOP Path",
+            1,
+            default_value=("",),
+            string_type=self.hou.stringParmType.NodeReference,
+        )
+        curve_ref_template.setTags(
+            {
+                "opfilter": "!!SOP!!",
+                "oprelative": ".",
+            }
+        )
+        controls_folder.addParmTemplate(curve_ref_template)
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate(
+                "building_density", "Building Density", 1, default_value=(0.35,), min=0.01, max=1.0
+            )
+        )
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate("min_height", "Min Height", 1, default_value=(6.0,), min=1.0, max=200.0)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate("max_height", "Max Height", 1, default_value=(24.0,), min=1.0, max=400.0)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate("min_footprint", "Min Footprint", 1, default_value=(2.0,), min=0.5, max=30.0)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate("max_footprint", "Max Footprint", 1, default_value=(6.0,), min=0.5, max=60.0)
+        )
+        controls_folder.addParmTemplate(self.hou.IntParmTemplate("seed", "Seed", 1, default_value=(0,), min=0, max=100000))
+        ptg.append(controls_folder)
+        geo.setParmTemplateGroup(ptg)
+
+        ground = geo.node("ground_grid")
+        road_x = geo.node("road_strip_x")
+        road_z = geo.node("road_strip_z")
+        road_mode_switch = geo.node("road_mode_switch")
+        road_curve_input = geo.node("road_curve_input")
+        road_curve_switch = geo.node("road_curve_switch")
+        road_curve_polywire = geo.node("road_curve_polywire")
+        road_curve_mask_points = geo.node("road_curve_mask_points")
+        scatter = geo.node("building_scatter")
+
+        if ground:
+            ground.parm("sizex").setExpression('ch("../block_size")')
+            ground.parm("sizey").setExpression('ch("../block_size")')
+        if road_x:
+            road_x.parm("sizex").setExpression('ch("../block_size")')
+            road_x.parm("sizey").setExpression('ch("../road_width")')
+        if road_z:
+            road_z.parm("sizex").setExpression('ch("../road_width")')
+            road_z.parm("sizey").setExpression('ch("../block_size")')
+        if road_mode_switch and road_mode_switch.parm("input"):
+            road_mode_switch.parm("input").setExpression('ch("../road_mode")')
+        if road_curve_input and road_curve_input.parm("objpath1"):
+            road_curve_input.parm("objpath1").setExpression('chs("../road_curve_path")')
+        if road_curve_input and road_curve_input.parm("xformtype"):
+            road_curve_input.parm("xformtype").set(1)
+        if road_curve_switch and road_curve_switch.parm("input"):
+            road_curve_switch.parm("input").setExpression('if(strlen(chs("../road_curve_path"))>0,1,0)')
+        if road_curve_polywire and road_curve_polywire.parm("radius"):
+            road_curve_polywire.parm("radius").setExpression('ch("../road_width")*0.5')
+        if road_curve_mask_points and road_curve_mask_points.parm("length"):
+            road_curve_mask_points.parm("length").setExpression('max(0.2, ch("../road_width")*0.35)')
+        if scatter:
+            scatter.parm("npts").setExpression('max(1, int(ch("../building_density") * pow(ch("../block_size") / 10.0, 2.0) * 12.0))')
+            scatter.parm("seed").setExpression('ch("../seed")')
+
+    def _build_template_single_building_v1(self, parent, node_name: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
+        name = self._sanitize_node_name(node_name or "single_building")
+        width = float(overrides.get("width", 8.0))
+        height = float(overrides.get("height", 12.0))
+        depth = float(overrides.get("depth", 8.0))
+        roof_scale = float(overrides.get("roof_scale", 1.15))
+        roof_height = float(overrides.get("roof_height", 3.0))
+
+        geo = parent.createNode("geo", name)
+        for child in geo.children():
+            child.destroy()
+
+        base = geo.createNode("box", "base_box")
+        base.parm("sizex").set(width)
+        base.parm("sizey").set(height)
+        base.parm("sizez").set(depth)
+        base_xf = geo.createNode("xform", "base_xform")
+        base_xf.setInput(0, base)
+        base_xf.parmTuple("t").set((0, height * 0.5, 0))
+
+        roof = geo.createNode("tube", "roof_peak")
+        roof.parm("type").set(1)  # polygon
+        roof.parm("cap").set(1)
+        roof.parm("rad1").set(max(width, depth) * 0.4)
+        roof.parm("rad2").set(0)
+        roof.parm("height").set(roof_height)
+        roof.parm("rows").set(1)
+        roof_xf = geo.createNode("xform", "roof_xform")
+        roof_xf.setInput(0, roof)
+        roof_xf.parmTuple("s").set((roof_scale, 1.0, roof_scale))
+        roof_xf.parmTuple("t").set((0, height + roof_height * 0.5, 0))
+
+        merge = geo.createNode("merge", "merge_building")
+        merge.setInput(0, base_xf)
+        merge.setInput(1, roof_xf)
+        out = geo.createNode("null", "OUT")
+        out.setInput(0, merge)
+        out.setDisplayFlag(True)
+        out.setRenderFlag(True)
+        geo.layoutChildren()
+        out.cook(force=True)
+        geo.setUserData("mcp_template_id", "single_building_v1")
+        self._setup_building_controls(geo)
+
+        result_geo = out.geometry()
+        return {
+            "template_id": "single_building_v1",
+            "root_node_path": geo.path(),
+            "output_node_path": out.path(),
+            "params": {"width": width, "height": height, "depth": depth, "roof_scale": roof_scale, "roof_height": roof_height},
+            "poly_count": len(result_geo.prims()) if result_geo else 0,
+            "point_count": len(result_geo.points()) if result_geo else 0,
+        }
+
+    def _build_template_road_segment_v1(self, parent, node_name: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
+        name = self._sanitize_node_name(node_name or "road_segment")
+        length = float(overrides.get("length", 30.0))
+        width = float(overrides.get("width", 6.0))
+        rows = int(overrides.get("rows", 8))
+        cols = int(overrides.get("cols", 16))
+        curb_height = float(overrides.get("curb_height", 0.15))
+
+        geo = parent.createNode("geo", name)
+        for child in geo.children():
+            child.destroy()
+
+        road = geo.createNode("grid", "road_grid")
+        road.parm("sizex").set(length)
+        road.parm("sizey").set(width)
+        road.parm("rows").set(max(2, rows))
+        road.parm("cols").set(max(2, cols))
+
+        peak = geo.createNode("peak", "road_crown")
+        peak.setInput(0, road)
+        peak.parm("dist").set(curb_height)
+
+        out = geo.createNode("null", "OUT")
+        out.setInput(0, peak)
+        out.setDisplayFlag(True)
+        out.setRenderFlag(True)
+        geo.layoutChildren()
+        out.cook(force=True)
+        geo.setUserData("mcp_template_id", "road_segment_v1")
+        self._setup_road_controls(geo)
+
+        result_geo = out.geometry()
+        return {
+            "template_id": "road_segment_v1",
+            "root_node_path": geo.path(),
+            "output_node_path": out.path(),
+            "params": {"length": length, "width": width, "rows": rows, "cols": cols, "curb_height": curb_height},
+            "poly_count": len(result_geo.prims()) if result_geo else 0,
+            "point_count": len(result_geo.points()) if result_geo else 0,
+        }
+
+    def _build_template_town_block_v1(self, parent, node_name: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
+        name = self._sanitize_node_name(node_name or "town_block")
+        block_size = float(overrides.get("block_size", 120.0))
+        road_width = float(overrides.get("road_width", 10.0))
+        road_mode = int(overrides.get("road_mode", 1))
+        road_curve_path = str(overrides.get("road_curve_path", "")).strip()
+        building_density = float(overrides.get("building_density", 0.35))
+        min_height = float(overrides.get("min_height", 6.0))
+        max_height = float(overrides.get("max_height", 24.0))
+        min_footprint = float(overrides.get("min_footprint", 2.0))
+        max_footprint = float(overrides.get("max_footprint", 6.0))
+        seed = int(overrides.get("seed", 0))
+
+        geo = parent.createNode("geo", name)
+        for child in geo.children():
+            child.destroy()
+
+        ground = geo.createNode("grid", "ground_grid")
+        ground.parm("sizex").set(block_size)
+        ground.parm("sizey").set(block_size)
+        ground.parm("rows").set(32)
+        ground.parm("cols").set(32)
+
+        road_x = geo.createNode("grid", "road_strip_x")
+        road_x.parm("sizex").set(block_size)
+        road_x.parm("sizey").set(road_width)
+        road_x.parm("rows").set(2)
+        road_x.parm("cols").set(32)
+
+        road_z = geo.createNode("grid", "road_strip_z")
+        road_z.parm("sizex").set(road_width)
+        road_z.parm("sizey").set(block_size)
+        road_z.parm("rows").set(32)
+        road_z.parm("cols").set(2)
+
+        road_merge = geo.createNode("merge", "road_merge")
+        road_merge.setInput(0, road_x)
+        road_merge.setInput(1, road_z)
+
+        road_curve_base = geo.createNode("line", "road_curve_base")
+        if road_curve_base.parm("points"):
+            road_curve_base.parm("points").set(24)
+        if road_curve_base.parm("originx"):
+            road_curve_base.parm("originx").set(-0.5)
+        if road_curve_base.parm("originy"):
+            road_curve_base.parm("originy").set(0.0)
+        if road_curve_base.parm("originz"):
+            road_curve_base.parm("originz").set(0.0)
+        if road_curve_base.parm("distx"):
+            road_curve_base.parm("distx").set(1.0)
+        if road_curve_base.parm("disty"):
+            road_curve_base.parm("disty").set(0.0)
+        if road_curve_base.parm("distz"):
+            road_curve_base.parm("distz").set(0.0)
+
+        road_curve_shape = geo.createNode("attribwrangle", "road_curve_shape")
+        road_curve_shape.setInput(0, road_curve_base)
+        road_curve_shape.parm("class").set(2)
+        road_curve_shape.parm("snippet").set(
+            "float s = relbbox(0, @P).x;\n"
+            "float b = ch(\"../block_size\");\n"
+            "float amp = b * 0.2;\n"
+            "@P.x = (s - 0.5) * b;\n"
+            "@P.z = sin(s * M_PI * 2.0) * amp;\n"
+            "@P.y = 0.0;\n"
+        )
+
+        road_curve_input = geo.createNode("object_merge", "road_curve_input")
+        if road_curve_input.parm("objpath1"):
+            road_curve_input.parm("objpath1").set(road_curve_path)
+        if road_curve_input.parm("xformtype"):
+            road_curve_input.parm("xformtype").set(1)
+
+        road_curve_switch = geo.createNode("switch", "road_curve_switch")
+        road_curve_switch.setInput(0, road_curve_shape)
+        road_curve_switch.setInput(1, road_curve_input)
+        if road_curve_switch.parm("input"):
+            road_curve_switch.parm("input").setExpression('if(strlen(chs("../road_curve_path"))>0,1,0)')
+
+        road_curve_polywire = geo.createNode("polywire", "road_curve_polywire")
+        road_curve_polywire.setInput(0, road_curve_switch)
+        if road_curve_polywire.parm("radius"):
+            road_curve_polywire.parm("radius").set(road_width * 0.5)
+
+        road_curve_flatten = geo.createNode("attribwrangle", "road_curve_flatten")
+        road_curve_flatten.setInput(0, road_curve_polywire)
+        road_curve_flatten.parm("class").set(2)
+        road_curve_flatten.parm("snippet").set("@P.y = 0.0;")
+
+        road_both_merge = geo.createNode("merge", "road_both_merge")
+        road_both_merge.setInput(0, road_merge)
+        road_both_merge.setInput(1, road_curve_flatten)
+
+        road_mode_switch = geo.createNode("switch", "road_mode_switch")
+        road_mode_switch.setInput(0, road_merge)
+        road_mode_switch.setInput(1, road_curve_flatten)
+        road_mode_switch.setInput(2, road_both_merge)
+        if road_mode_switch.parm("input"):
+            road_mode_switch.parm("input").set(max(0, min(road_mode, 2)))
+
+        road_curve_mask_points = geo.createNode("resample", "road_curve_mask_points")
+        road_curve_mask_points.setInput(0, road_curve_switch)
+        if road_curve_mask_points.parm("length"):
+            road_curve_mask_points.parm("length").set(max(0.2, road_width * 0.35))
+
+        building_scatter = geo.createNode("scatter", "building_scatter")
+        building_scatter.setInput(0, ground)
+        scatter_count = max(1, int(building_density * ((block_size / 10.0) ** 2.0) * 12.0))
+        building_scatter.parm("npts").set(scatter_count)
+        if building_scatter.parm("seed"):
+            building_scatter.parm("seed").set(seed)
+
+        remove_road_points = geo.createNode("attribwrangle", "remove_road_points")
+        remove_road_points.setInput(0, building_scatter)
+        remove_road_points.setInput(1, road_curve_mask_points)
+        remove_road_points.parm("class").set(2)  # point
+        remove_road_points.parm("snippet").set(
+            "int mode = chi(\"../road_mode\");\n"
+            "float rw = ch(\"../road_width\") * 0.6;\n"
+            "int kill = 0;\n"
+            "if (mode == 0 || mode == 2) {\n"
+            "    if (abs(@P.x) < rw || abs(@P.z) < rw) kill = 1;\n"
+            "}\n"
+            "if ((mode == 1 || mode == 2) && npoints(1) > 0) {\n"
+            "    int near = nearpoint(1, @P);\n"
+            "    if (near >= 0) {\n"
+            "        vector rp = point(1, \"P\", near);\n"
+            "        vector2 a = set(@P.x, @P.z);\n"
+            "        vector2 b = set(rp.x, rp.z);\n"
+            "        if (distance(a, b) < rw) kill = 1;\n"
+            "    }\n"
+            "}\n"
+            "if (kill != 0) {\n"
+            "    removepoint(0, @ptnum);\n"
+            "}\n"
+        )
+
+        building_attrs = geo.createNode("attribwrangle", "building_attrs")
+        building_attrs.setInput(0, remove_road_points)
+        building_attrs.parm("class").set(2)  # point
+        building_attrs.parm("snippet").set(
+            'float seedf = ch("../seed");\n'
+            'float minf = ch("../min_footprint");\n'
+            'float maxf = ch("../max_footprint");\n'
+            'float minh = ch("../min_height");\n'
+            'float maxh = ch("../max_height");\n'
+            "float f = fit01(rand(@ptnum * 19.73 + seedf), minf, maxf);\n"
+            "float h = fit01(rand(@ptnum * 53.11 + seedf + 11.3), minh, maxh);\n"
+            "v@scale = set(f, h, f);\n"
+            "@P.y = h * 0.5;\n"
+        )
+
+        building_unit = geo.createNode("box", "building_unit")
+        building_unit.parm("sizex").set(1.0)
+        building_unit.parm("sizey").set(1.0)
+        building_unit.parm("sizez").set(1.0)
+
+        copy_buildings = geo.createNode("copytopoints", "copy_buildings")
+        copy_buildings.setInput(0, building_unit)
+        copy_buildings.setInput(1, building_attrs)
+
+        town_merge = geo.createNode("merge", "merge_town")
+        town_merge.setInput(0, ground)
+        town_merge.setInput(1, road_mode_switch)
+        town_merge.setInput(2, copy_buildings)
+
+        out = geo.createNode("null", "OUT")
+        out.setInput(0, town_merge)
+        out.setDisplayFlag(True)
+        out.setRenderFlag(True)
+        geo.layoutChildren()
+        out.cook(force=True)
+
+        geo.setUserData("mcp_template_id", "town_block_v1")
+        self._setup_town_controls(geo)
+
+        if geo.parm("block_size"):
+            geo.parm("block_size").set(block_size)
+        if geo.parm("road_width"):
+            geo.parm("road_width").set(road_width)
+        if geo.parm("road_mode"):
+            geo.parm("road_mode").set(max(0, min(road_mode, 2)))
+        if geo.parm("road_curve_path"):
+            geo.parm("road_curve_path").set(road_curve_path)
+        if geo.parm("building_density"):
+            geo.parm("building_density").set(building_density)
+        if geo.parm("min_height"):
+            geo.parm("min_height").set(min_height)
+        if geo.parm("max_height"):
+            geo.parm("max_height").set(max_height)
+        if geo.parm("min_footprint"):
+            geo.parm("min_footprint").set(min_footprint)
+        if geo.parm("max_footprint"):
+            geo.parm("max_footprint").set(max_footprint)
+        if geo.parm("seed"):
+            geo.parm("seed").set(seed)
+
+        out.cook(force=True)
+        result_geo = out.geometry()
+        return {
+            "template_id": "town_block_v1",
+            "root_node_path": geo.path(),
+            "output_node_path": out.path(),
+            "params": {
+                "block_size": block_size,
+                "road_width": road_width,
+                "road_mode": max(0, min(road_mode, 2)),
+                "road_curve_path": road_curve_path,
+                "building_density": building_density,
+                "min_height": min_height,
+                "max_height": max_height,
+                "min_footprint": min_footprint,
+                "max_footprint": max_footprint,
+                "seed": seed,
+            },
+            "poly_count": len(result_geo.prims()) if result_geo else 0,
+            "point_count": len(result_geo.points()) if result_geo else 0,
+        }
 
     def _resolve_display_node(self, node_path: str):
         node = self.hou.node(node_path)

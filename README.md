@@ -169,6 +169,18 @@ flowchart LR
 ### Unity 友好导出
 - Houdini: `export_unity_fbx`（FBX + 内嵌贴图 + 轴系转换）
 
+### Houdini 模板化 HDA（Phase 1）
+- `get_template_catalog`：查询可用模板及参数 schema
+- `plan_hda_from_prompt`：自然语言 -> 模板与参数计划（启发式）
+- `build_hda_from_template`：模板实例化 + 参数/图校验 + dry run + HDA封装
+- `build_hda_from_prompt`：自然语言一键生成 HDA
+- `get_node_graph_summary`：节点图摘要（限深度）
+- `validate_graph`：结构与可执行校验
+- `validate_params`：模板参数规则校验
+- `dry_run_cook`：执行预校验
+- `repair_graph`：自动修复 OUT/flag 等基础结构问题
+- `generate_hda_ui`：按模板生成规范参数面板（可复用控制项）
+
 ## Run Modes
 
 ### 统一面板

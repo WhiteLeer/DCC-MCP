@@ -32,6 +32,140 @@ def create_server(name: str = "Houdini-Bridge") -> FastMCP:
         return await invoke_operation("get_scene_state", {})
 
     @mcp.tool()
+    async def get_template_catalog(include_schema: bool = True) -> dict:
+        return await invoke_operation("get_template_catalog", {"include_schema": include_schema})
+
+    @mcp.tool()
+    async def plan_hda_from_prompt(prompt: str) -> dict:
+        return await invoke_operation("plan_hda_from_prompt", {"prompt": prompt})
+
+    @mcp.tool()
+    async def build_hda_from_prompt(
+        prompt: str,
+        parent_path: str = "/obj",
+        node_name: str = "",
+        asset_name: str = "",
+        asset_label: str = "",
+        hda_file_path: str = "",
+        version: str = "",
+        save_as_embedded: bool = False,
+        ignore_validation_errors: bool = False,
+    ) -> dict:
+        return await invoke_operation(
+            "build_hda_from_prompt",
+            {
+                "prompt": prompt,
+                "parent_path": parent_path,
+                "node_name": node_name,
+                "asset_name": asset_name,
+                "asset_label": asset_label,
+                "hda_file_path": hda_file_path,
+                "version": version,
+                "save_as_embedded": save_as_embedded,
+                "ignore_validation_errors": ignore_validation_errors,
+            },
+        )
+
+    @mcp.tool()
+    async def build_hda_from_template(
+        template_id: str,
+        parent_path: str = "/obj",
+        node_name: str = "",
+        overrides: dict | None = None,
+        asset_name: str = "",
+        asset_label: str = "",
+        hda_file_path: str = "",
+        version: str = "",
+        save_as_embedded: bool = False,
+        ignore_validation_errors: bool = False,
+    ) -> dict:
+        return await invoke_operation(
+            "build_hda_from_template",
+            {
+                "template_id": template_id,
+                "parent_path": parent_path,
+                "node_name": node_name,
+                "overrides": overrides or {},
+                "asset_name": asset_name,
+                "asset_label": asset_label,
+                "hda_file_path": hda_file_path,
+                "version": version,
+                "save_as_embedded": save_as_embedded,
+                "ignore_validation_errors": ignore_validation_errors,
+            },
+        )
+
+    @mcp.tool()
+    async def repair_graph(
+        root_path: str,
+    ) -> dict:
+        return await invoke_operation("repair_graph", {"root_path": root_path})
+
+    @mcp.tool()
+    async def generate_hda_ui(
+        root_path: str,
+        schema_id: str = "",
+    ) -> dict:
+        return await invoke_operation("generate_hda_ui", {"root_path": root_path, "schema_id": schema_id})
+
+    @mcp.tool()
+    async def get_node_graph_summary(
+        root_path: str = "/obj",
+        max_depth: int = 2,
+        max_children: int = 50,
+    ) -> dict:
+        return await invoke_operation(
+            "get_node_graph_summary",
+            {"root_path": root_path, "max_depth": max_depth, "max_children": max_children},
+        )
+
+    @mcp.tool()
+    async def instantiate_template(
+        template_id: str,
+        parent_path: str = "/obj",
+        node_name: str = "",
+        overrides: dict | None = None,
+    ) -> dict:
+        return await invoke_operation(
+            "instantiate_template",
+            {
+                "template_id": template_id,
+                "parent_path": parent_path,
+                "node_name": node_name,
+                "overrides": overrides or {},
+            },
+        )
+
+    @mcp.tool()
+    async def validate_graph(
+        root_path: str,
+        rule_set: str = "",
+    ) -> dict:
+        return await invoke_operation(
+            "validate_graph",
+            {"root_path": root_path, "rule_set": rule_set},
+        )
+
+    @mcp.tool()
+    async def validate_params(
+        root_path: str,
+        schema_id: str = "",
+    ) -> dict:
+        return await invoke_operation(
+            "validate_params",
+            {"root_path": root_path, "schema_id": schema_id},
+        )
+
+    @mcp.tool()
+    async def dry_run_cook(
+        root_path: str,
+    ) -> dict:
+        return await invoke_operation(
+            "dry_run_cook",
+            {"root_path": root_path},
+        )
+
+    @mcp.tool()
     async def create_box(
         node_name: str = "box",
         size_x: float = 1.0,
