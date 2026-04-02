@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import math
 from pathlib import Path
 from typing import Any, Dict
 
@@ -60,6 +61,8 @@ class HoudiniSessionBackend:
             return self.validate_params(params)
         if operation == "dry_run_cook":
             return self.dry_run_cook(params)
+        if operation == "inspect_geometry":
+            return self.inspect_geometry(params)
         if operation == "clean_mesh":
             return self.clean_mesh(params)
         if operation == "cleanup_attributes":
@@ -92,6 +95,8 @@ class HoudiniSessionBackend:
             return self.import_model(params)
         if operation == "capture_screenshot":
             return self.capture_screenshot(params)
+        if operation == "frame_camera_on_geo":
+            return self.frame_camera_on_geo(params)
         if operation == "export_geometry":
             return self.export_geometry(params)
         if operation == "export_unity_fbx":
@@ -177,6 +182,46 @@ class HoudiniSessionBackend:
                     "seed": {"type": "int", "min": 0, "max": 100000},
                 },
             },
+            "crystal_courtyard_v1": {
+                "description": "Procedural crystal courtyard over water with arch, pillars, and stepping stones.",
+                "category": "environment",
+                "defaults": {
+                    "water_size": 420.0,
+                    "arch_count": 16,
+                    "ring_pillar_count": 18,
+                    "step_count": 14,
+                    "crystal_scale": 1.0,
+                    "seed": 0,
+                },
+                "schema": {
+                    "water_size": {"type": "float", "min": 40.0, "max": 4000.0},
+                    "arch_count": {"type": "int", "min": 4, "max": 128},
+                    "ring_pillar_count": {"type": "int", "min": 4, "max": 256},
+                    "step_count": {"type": "int", "min": 4, "max": 128},
+                    "crystal_scale": {"type": "float", "min": 0.2, "max": 8.0},
+                    "seed": {"type": "int", "min": 0, "max": 100000},
+                },
+            },
+            "crystal_courtyard_v2": {
+                "description": "Crystal gate scene with twin leaning arches, center shard burst, and stepping path.",
+                "category": "environment",
+                "defaults": {
+                    "water_size": 420.0,
+                    "arch_count": 18,
+                    "ring_pillar_count": 14,
+                    "step_count": 14,
+                    "crystal_scale": 1.0,
+                    "seed": 0,
+                },
+                "schema": {
+                    "water_size": {"type": "float", "min": 40.0, "max": 4000.0},
+                    "arch_count": {"type": "int", "min": 4, "max": 128},
+                    "ring_pillar_count": {"type": "int", "min": 4, "max": 256},
+                    "step_count": {"type": "int", "min": 4, "max": 128},
+                    "crystal_scale": {"type": "float", "min": 0.2, "max": 8.0},
+                    "seed": {"type": "int", "min": 0, "max": 100000},
+                },
+            },
         }
         if not include_schema:
             for item in templates.values():
@@ -201,6 +246,9 @@ class HoudiniSessionBackend:
         if any(token in text for token in ("town", "city", "block", "district", "城镇", "城市", "街区", "小镇")):
             template_id = "town_block_v1"
             suggested_name = "generated_town"
+        elif any(token in text for token in ("crystal", "ice", "water", "arch", "镜面", "冰", "水面", "晶体", "拱")):
+            template_id = "crystal_courtyard_v2"
+            suggested_name = "generated_crystal_scene"
         elif any(token in text for token in ("road", "street", "path", "lane", "道路", "马路", "街道", "路段")):
             template_id = "road_segment_v1"
             suggested_name = "generated_road"
@@ -221,6 +269,13 @@ class HoudiniSessionBackend:
                 overrides["length"] = float(numbers[0])
             if len(numbers) >= 2:
                 overrides["width"] = float(numbers[1])
+        elif template_id in {"crystal_courtyard_v1", "crystal_courtyard_v2"}:
+            if len(numbers) >= 1:
+                overrides["water_size"] = float(numbers[0])
+            if len(numbers) >= 2:
+                overrides["arch_count"] = int(float(numbers[1]))
+            if len(numbers) >= 3:
+                overrides["ring_pillar_count"] = int(float(numbers[2]))
         else:
             if len(numbers) >= 1:
                 overrides["block_size"] = float(numbers[0])
@@ -409,6 +464,16 @@ class HoudiniSessionBackend:
                 "max_footprint",
                 "seed",
             ]
+        elif schema_id in {"crystal_courtyard_v1", "crystal_courtyard_v2"}:
+            self._setup_crystal_controls(root)
+            exposed = [
+                "water_size",
+                "arch_count",
+                "ring_pillar_count",
+                "step_count",
+                "crystal_scale",
+                "seed",
+            ]
         else:
             return {
                 "success": False,
@@ -478,6 +543,10 @@ class HoudiniSessionBackend:
             result = self._build_template_road_segment_v1(parent, node_name, overrides)
         elif template_id == "town_block_v1":
             result = self._build_template_town_block_v1(parent, node_name, overrides)
+        elif template_id == "crystal_courtyard_v1":
+            result = self._build_template_crystal_courtyard_v1(parent, node_name, overrides)
+        elif template_id == "crystal_courtyard_v2":
+            result = self._build_template_crystal_courtyard_v2(parent, node_name, overrides)
         else:
             raise RuntimeError(f"Unsupported template_id: {template_id}")
 
@@ -636,6 +705,29 @@ class HoudiniSessionBackend:
                     errors.append("height_range_invalid")
                 if min_f > max_f:
                     errors.append("footprint_range_invalid")
+        elif schema_id in {"crystal_courtyard_v1", "crystal_courtyard_v2"}:
+            water_size = float(root.parm("water_size").eval()) if root.parm("water_size") else 0.0
+            arch_count = int(root.parm("arch_count").eval()) if root.parm("arch_count") else 0
+            ring_pillar_count = int(root.parm("ring_pillar_count").eval()) if root.parm("ring_pillar_count") else 0
+            step_count = int(root.parm("step_count").eval()) if root.parm("step_count") else 0
+            crystal_scale = float(root.parm("crystal_scale").eval()) if root.parm("crystal_scale") else 0.0
+            values = {
+                "water_size": water_size,
+                "arch_count": arch_count,
+                "ring_pillar_count": ring_pillar_count,
+                "step_count": step_count,
+                "crystal_scale": crystal_scale,
+            }
+            if not (40.0 <= water_size <= 4000.0):
+                errors.append("water_size_out_of_range")
+            if not (4 <= arch_count <= 128):
+                errors.append("arch_count_out_of_range")
+            if not (4 <= ring_pillar_count <= 256):
+                errors.append("ring_pillar_count_out_of_range")
+            if not (4 <= step_count <= 128):
+                errors.append("step_count_out_of_range")
+            if not (0.2 <= crystal_scale <= 8.0):
+                errors.append("crystal_scale_out_of_range")
         else:
             warnings.append(f"unknown_schema:{schema_id}")
 
@@ -686,6 +778,61 @@ class HoudiniSessionBackend:
                 "poly_count": poly_count,
                 "point_count": point_count,
                 "diagnostics": diagnostics,
+            },
+        }
+
+    def inspect_geometry(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        root_path = str(params.get("root_path") or params.get("geo_path") or "").strip()
+        if not root_path:
+            raise RuntimeError("root_path or geo_path is required")
+        root = self.hou.node(root_path)
+        if root is None:
+            raise RuntimeError(f"Node not found: {root_path}")
+
+        if root.type().category().name() == "Object":
+            target = root.displayNode()
+            if target is None:
+                raise RuntimeError(f"No display node found in {root_path}")
+        else:
+            target = root
+
+        target.cook(force=True)
+        geo = target.geometry()
+        if geo is None:
+            raise RuntimeError(f"No geometry on node: {target.path()}")
+
+        bbox = geo.boundingBox()
+        bmin = bbox.minvec()
+        bmax = bbox.maxvec()
+        center = bbox.center()
+        size = bbox.sizevec()
+
+        point_count = len(geo.points())
+        prim_count = len(geo.prims())
+        sample_indices = []
+        sample_points = []
+        if point_count > 0:
+            sample_indices = sorted({0, point_count // 3, (point_count * 2) // 3, point_count - 1})
+            points = geo.points()
+            for idx in sample_indices:
+                p = points[idx].position()
+                sample_points.append([float(p[0]), float(p[1]), float(p[2])])
+
+        return {
+            "success": True,
+            "message": "Geometry inspection completed",
+            "error": None,
+            "context": {
+                "root_path": root_path,
+                "target_path": target.path(),
+                "point_count": point_count,
+                "prim_count": prim_count,
+                "bbox_min": [float(bmin[0]), float(bmin[1]), float(bmin[2])],
+                "bbox_max": [float(bmax[0]), float(bmax[1]), float(bmax[2])],
+                "bbox_center": [float(center[0]), float(center[1]), float(center[2])],
+                "bbox_size": [float(size[0]), float(size[1]), float(size[2])],
+                "sample_point_indices": sample_indices,
+                "sample_points": sample_points,
             },
         }
 
@@ -1034,6 +1181,10 @@ class HoudiniSessionBackend:
             self._setup_road_controls(hda_node)
         elif template_id == "town_block_v1":
             self._setup_town_controls(hda_node)
+        elif template_id == "crystal_courtyard_v1":
+            self._setup_crystal_controls(hda_node)
+        elif template_id == "crystal_courtyard_v2":
+            self._setup_crystal_controls(hda_node)
 
         if definition is not None:
             try:
@@ -1447,6 +1598,7 @@ class HoudiniSessionBackend:
         camera_path = str(params.get("camera_path", "")).strip()
         width = max(64, int(params.get("width", 1024)))
         height = max(64, int(params.get("height", 1024)))
+        capture_mode = str(params.get("capture_mode", "auto")).strip().lower() or "auto"
 
         output_file = Path(output_path)
         output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1476,12 +1628,47 @@ class HoudiniSessionBackend:
             rop.parm("res1").set(width)
         if rop.parm("res2"):
             rop.parm("res2").set(height)
+        if rop.parm("forceobjects"):
+            rop.parm("forceobjects").set("*")
         if rop.parm("picture"):
             rop.parm("picture").set(str(output_file))
         elif rop.parm("vm_picture"):
             rop.parm("vm_picture").set(str(output_file))
+        mode_used = "smooth"
 
-        rop.parm("execute").pressButton()
+        def _render_with_mode(mode_token: str) -> None:
+            if rop.parm("shadingmode"):
+                rop.parm("shadingmode").set(mode_token)
+            if rop.parm("hqlighting"):
+                rop.parm("hqlighting").set(1 if mode_token != "wire" else 0)
+            if rop.parm("usegeocolor"):
+                rop.parm("usegeocolor").set(1 if mode_token == "wire" else 0)
+            rop.parm("execute").pressButton()
+
+        def _is_mostly_black(path: Path) -> bool:
+            try:
+                from PIL import Image, ImageStat
+
+                with Image.open(path) as img:
+                    rgb = img.convert("RGB")
+                    stat = ImageStat.Stat(rgb)
+                    mean = stat.mean
+                    luminance = (0.2126 * mean[0]) + (0.7152 * mean[1]) + (0.0722 * mean[2])
+                    return luminance < 2.0
+            except Exception:
+                return False
+
+        if capture_mode in {"wire", "smooth"}:
+            mode_used = capture_mode
+            _render_with_mode(capture_mode)
+        else:
+            _render_with_mode("smooth")
+            if output_file.exists() and _is_mostly_black(output_file):
+                _render_with_mode("wire")
+                mode_used = "wire"
+            else:
+                mode_used = "smooth"
+
         if not output_file.exists():
             raise RuntimeError(f"Houdini screenshot failed: {output_file}")
 
@@ -1490,8 +1677,96 @@ class HoudiniSessionBackend:
             "camera_path": camera_path,
             "width": width,
             "height": height,
+            "capture_mode_used": mode_used,
         }
         message = f"Captured Houdini screenshot: {output_file.name}"
+        return {"success": True, "message": message, "prompt": message, "error": None, "context": data}
+
+    def frame_camera_on_geo(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        geo_path = str(params.get("geo_path", "")).strip()
+        if not geo_path:
+            raise RuntimeError("geo_path is required")
+        camera_path = str(params.get("camera_path", "/obj/cam1")).strip() or "/obj/cam1"
+        distance_scale = float(params.get("distance_scale", 2.2))
+        height_scale = float(params.get("height_scale", 0.65))
+        view = str(params.get("view", "front")).strip().lower() or "front"
+
+        root_node, display_node = self._resolve_display_node(geo_path)
+        try:
+            if root_node is not None and root_node.type().category().name() == "Object":
+                for child in root_node.children():
+                    if child.type().category().name() == "Sop":
+                        child.setDisplayFlag(child.path() == display_node.path())
+                        child.setRenderFlag(child.path() == display_node.path())
+            else:
+                display_node.setDisplayFlag(True)
+                display_node.setRenderFlag(True)
+        except Exception:
+            pass
+        geo = display_node.geometry()
+        if geo is None:
+            raise RuntimeError(f"No geometry to frame for: {display_node.path()}")
+
+        bbox = geo.boundingBox()
+        center = bbox.center()
+        size = bbox.sizevec()
+        sx = max(0.001, float(size[0]))
+        sy = max(0.001, float(size[1]))
+        sz = max(0.001, float(size[2]))
+        span = max(sx, sy, sz)
+
+        cam = self.hou.node(camera_path)
+        if cam is None:
+            cam = self.hou.node("/obj").createNode("cam", self._sanitize_node_name(Path(camera_path).name or "cam1"))
+            camera_path = cam.path()
+
+        cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
+        if view == "top":
+            px = cx
+            py = cy + span * distance_scale
+            pz = cz
+            pitch, yaw = -90.0, 0.0
+        elif view == "side":
+            px = cx + span * distance_scale
+            py = cy + span * height_scale
+            pz = cz
+            dx = cx - px
+            dy = cy - py
+            dz = cz - pz
+            yaw = math.degrees(math.atan2(-dx, -dz))
+            horiz = math.sqrt(dx * dx + dz * dz)
+            pitch = math.degrees(math.atan2(dy, horiz))
+        else:
+            px = cx
+            py = cy + span * height_scale
+            pz = cz + span * distance_scale
+            dx = cx - px
+            dy = cy - py
+            dz = cz - pz
+            yaw = math.degrees(math.atan2(-dx, -dz))
+            horiz = math.sqrt(dx * dx + dz * dz)
+            pitch = math.degrees(math.atan2(dy, horiz))
+
+        cam.parmTuple("t").set((px, py, pz))
+        cam.parmTuple("r").set((pitch, yaw, 0.0))
+        if cam.parm("focal"):
+            cam.parm("focal").set(35.0)
+        if cam.parm("near"):
+            cam.parm("near").set(max(0.01, span * 0.01))
+        if cam.parm("far"):
+            cam.parm("far").set(max(2000.0, span * 20.0))
+
+        data = {
+            "geo_path": geo_path,
+            "display_node_path": display_node.path(),
+            "camera_path": camera_path,
+            "view": view,
+            "center": [cx, cy, cz],
+            "bbox_size": [sx, sy, sz],
+            "camera_translate": [px, py, pz],
+            "camera_rotate": [pitch, yaw, 0.0],
+        }
+        message = f"Framed camera {camera_path} on {geo_path}"
         return {"success": True, "message": message, "prompt": message, "error": None, "context": data}
 
     def export_geometry(self, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -1727,6 +2002,69 @@ class HoudiniSessionBackend:
         if scatter:
             scatter.parm("npts").setExpression('max(1, int(ch("../building_density") * pow(ch("../block_size") / 10.0, 2.0) * 12.0))')
             scatter.parm("seed").setExpression('ch("../seed")')
+
+    def _setup_crystal_controls(self, geo) -> None:
+        if geo.parm("water_size") and geo.parm("arch_count") and geo.parm("ring_pillar_count"):
+            return
+        ptg = geo.parmTemplateGroup()
+        controls_folder = self.hou.FolderParmTemplate("mcp_crystal", "MCP Crystal")
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate("water_size", "Water Size", 1, default_value=(420.0,), min=40.0, max=4000.0)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.IntParmTemplate("arch_count", "Arch Count", 1, default_value=(16,), min=4, max=128)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.IntParmTemplate("ring_pillar_count", "Ring Pillar Count", 1, default_value=(18,), min=4, max=256)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.IntParmTemplate("step_count", "Step Count", 1, default_value=(14,), min=4, max=128)
+        )
+        controls_folder.addParmTemplate(
+            self.hou.FloatParmTemplate("crystal_scale", "Crystal Scale", 1, default_value=(1.0,), min=0.2, max=8.0)
+        )
+        controls_folder.addParmTemplate(self.hou.IntParmTemplate("seed", "Seed", 1, default_value=(0,), min=0, max=100000))
+        ptg.append(controls_folder)
+        geo.setParmTemplateGroup(ptg)
+
+        water = geo.node("water_plane")
+        arch_pts = geo.node("arch_points")
+        ring_pts = geo.node("ring_points")
+        steps_pts = geo.node("step_points")
+        arch_copy = geo.node("arch_copy")
+        ring_copy = geo.node("ring_copy")
+        step_copy = geo.node("step_copy")
+        arch_crystal = geo.node("arch_crystal")
+        ring_crystal = geo.node("ring_crystal")
+        step_box = geo.node("step_box")
+
+        if water:
+            water.parm("sizex").setExpression('ch("../water_size")')
+            water.parm("sizey").setExpression('ch("../water_size")')
+        if arch_pts and arch_pts.parm("npts"):
+            arch_pts.parm("npts").setExpression('chi("../arch_count")')
+        if ring_pts and ring_pts.parm("npts"):
+            ring_pts.parm("npts").setExpression('chi("../ring_pillar_count")')
+        if steps_pts and steps_pts.parm("npts"):
+            steps_pts.parm("npts").setExpression('chi("../step_count")')
+        if arch_copy and arch_copy.parm("stamp"):
+            arch_copy.parm("stamp").set(1)
+        if ring_copy and ring_copy.parm("stamp"):
+            ring_copy.parm("stamp").set(1)
+        if step_copy and step_copy.parm("stamp"):
+            step_copy.parm("stamp").set(1)
+        if arch_crystal:
+            arch_crystal.parm("sizex").setExpression('max(0.8, ch("../water_size")*0.018*ch("../crystal_scale"))')
+            arch_crystal.parm("sizey").setExpression('max(2.0, ch("../water_size")*0.13*ch("../crystal_scale"))')
+            arch_crystal.parm("sizez").setExpression('max(0.8, ch("../water_size")*0.018*ch("../crystal_scale"))')
+        if ring_crystal:
+            ring_crystal.parm("sizex").setExpression('max(0.8, ch("../water_size")*0.015*ch("../crystal_scale"))')
+            ring_crystal.parm("sizey").setExpression('max(2.0, ch("../water_size")*0.16*ch("../crystal_scale"))')
+            ring_crystal.parm("sizez").setExpression('max(0.8, ch("../water_size")*0.015*ch("../crystal_scale"))')
+        if step_box:
+            step_box.parm("sizex").setExpression('max(2.0, ch("../water_size")*0.11)')
+            step_box.parm("sizey").setExpression('max(0.25, ch("../water_size")*0.004)')
+            step_box.parm("sizez").setExpression('max(1.0, ch("../water_size")*0.03)')
 
     def _build_template_single_building_v1(self, parent, node_name: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
         name = self._sanitize_node_name(node_name or "single_building")
@@ -2036,6 +2374,537 @@ class HoudiniSessionBackend:
                 "max_height": max_height,
                 "min_footprint": min_footprint,
                 "max_footprint": max_footprint,
+                "seed": seed,
+            },
+            "poly_count": len(result_geo.prims()) if result_geo else 0,
+            "point_count": len(result_geo.points()) if result_geo else 0,
+        }
+
+    def _build_template_crystal_courtyard_v1(self, parent, node_name: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
+        name = self._sanitize_node_name(node_name or "crystal_courtyard")
+        water_size = float(overrides.get("water_size", 420.0))
+        arch_count = int(overrides.get("arch_count", 16))
+        ring_pillar_count = int(overrides.get("ring_pillar_count", 18))
+        step_count = int(overrides.get("step_count", 14))
+        crystal_scale = float(overrides.get("crystal_scale", 1.0))
+        seed = int(overrides.get("seed", 0))
+
+        geo = parent.createNode("geo", name)
+        for child in geo.children():
+            child.destroy()
+
+        water = geo.createNode("grid", "water_plane")
+        water.parm("sizex").set(water_size)
+        water.parm("sizey").set(water_size)
+        water.parm("rows").set(48)
+        water.parm("cols").set(48)
+
+        arch_pts = geo.createNode("line", "arch_points")
+        self._set_parm_if_exists(arch_pts, "npts", max(4, arch_count))
+        self._set_parm_if_exists(arch_pts, "points", max(4, arch_count))
+        arch_shape = geo.createNode("attribwrangle", "arch_shape")
+        arch_shape.setInput(0, arch_pts)
+        arch_shape.parm("class").set(2)
+        arch_shape.parm("snippet").set(
+            "float u = float(@ptnum) / max(1.0, float(npoints(0) - 1));\n"
+            "float t = (u*2.0 - 1.0);\n"
+            "float r = ch(\"../water_size\") * 0.18;\n"
+            "float y = (1.0 - t*t) * ch(\"../water_size\") * 0.06;\n"
+            "@P = set(t * r, y, -abs(t) * ch(\"../water_size\") * 0.09);\n"
+            "v@N = normalize(set(t, 0.0, -1.0));\n"
+        )
+
+        arch_crystal = geo.createNode("box", "arch_crystal")
+        arch_crystal.parm("sizex").set(max(0.8, water_size * 0.018 * crystal_scale))
+        arch_crystal.parm("sizey").set(max(2.0, water_size * 0.13 * crystal_scale))
+        arch_crystal.parm("sizez").set(max(0.8, water_size * 0.018 * crystal_scale))
+        arch_crystal_fx = geo.createNode("attribwrangle", "arch_crystal_fx")
+        arch_crystal_fx.setInput(0, arch_crystal)
+        arch_crystal_fx.parm("class").set(2)
+        arch_crystal_fx.parm("snippet").set(
+            "float s = ch(\"../seed\");\n"
+            "float n = rand(@ptnum*7.13+s);\n"
+            "@P += normalize(@P + set(0.1,0.0,0.1)) * fit01(n, -0.12, 0.2) * ch(\"../crystal_scale\");\n"
+        )
+
+        arch_copy = geo.createNode("copytopoints", "arch_copy")
+        arch_copy.setInput(0, arch_crystal_fx)
+        arch_copy.setInput(1, arch_shape)
+
+        ring_pts = geo.createNode("circle", "ring_points")
+        self._set_parm_if_exists(ring_pts, "type", 1)
+        self._set_parm_if_exists(ring_pts, "arc", 360)
+        self._set_parm_if_exists(ring_pts, "divs", max(4, ring_pillar_count))
+        self._set_parm_if_exists(ring_pts, "numdivs", max(4, ring_pillar_count))
+        self._set_parm_if_exists(ring_pts, "radx", water_size * 0.42)
+        self._set_parm_if_exists(ring_pts, "rady", water_size * 0.42)
+
+        ring_crystal = geo.createNode("box", "ring_crystal")
+        ring_crystal.parm("sizex").set(max(0.8, water_size * 0.015 * crystal_scale))
+        ring_crystal.parm("sizey").set(max(2.0, water_size * 0.16 * crystal_scale))
+        ring_crystal.parm("sizez").set(max(0.8, water_size * 0.015 * crystal_scale))
+        ring_copy = geo.createNode("copytopoints", "ring_copy")
+        ring_copy.setInput(0, ring_crystal)
+        ring_copy.setInput(1, ring_pts)
+
+        steps_pts = geo.createNode("line", "step_points")
+        self._set_parm_if_exists(steps_pts, "npts", max(4, step_count))
+        self._set_parm_if_exists(steps_pts, "points", max(4, step_count))
+        steps_shape = geo.createNode("attribwrangle", "step_shape")
+        steps_shape.setInput(0, steps_pts)
+        steps_shape.parm("class").set(2)
+        steps_shape.parm("snippet").set(
+            "float u = float(@ptnum) / max(1.0, float(npoints(0) - 1));\n"
+            "@P = set(0.0, 0.22, fit(u, 0.0, 1.0, ch(\"../water_size\")*0.18, -ch(\"../water_size\")*0.2));\n"
+        )
+        step_box = geo.createNode("box", "step_box")
+        step_box.parm("sizex").set(max(2.0, water_size * 0.11))
+        step_box.parm("sizey").set(max(0.25, water_size * 0.004))
+        step_box.parm("sizez").set(max(1.0, water_size * 0.03))
+        step_copy = geo.createNode("copytopoints", "step_copy")
+        step_copy.setInput(0, step_box)
+        step_copy.setInput(1, steps_shape)
+
+        center_pts = geo.createNode("sphere", "center_points_src")
+        self._set_parm_if_exists(center_pts, "type", 1)
+        self._set_parm_if_exists(center_pts, "radx", 3.5)
+        self._set_parm_if_exists(center_pts, "rady", 2.2)
+        self._set_parm_if_exists(center_pts, "radz", 3.5)
+        center_scatter = geo.createNode("scatter", "center_scatter")
+        center_scatter.setInput(0, center_pts)
+        center_scatter.parm("npts").set(40)
+        if center_scatter.parm("seed"):
+            center_scatter.parm("seed").set(seed + 31)
+        center_shard = geo.createNode("box", "center_shard")
+        center_shard.parm("sizex").set(1.6)
+        center_shard.parm("sizey").set(3.8)
+        center_shard.parm("sizez").set(1.2)
+        center_copy = geo.createNode("copytopoints", "center_copy")
+        center_copy.setInput(0, center_shard)
+        center_copy.setInput(1, center_scatter)
+
+        all_merge = geo.createNode("merge", "merge_scene")
+        all_merge.setInput(0, water)
+        all_merge.setInput(1, arch_copy)
+        all_merge.setInput(2, ring_copy)
+        all_merge.setInput(3, step_copy)
+        all_merge.setInput(4, center_copy)
+
+        out = geo.createNode("null", "OUT")
+        out.setInput(0, all_merge)
+        out.setDisplayFlag(True)
+        out.setRenderFlag(True)
+        geo.layoutChildren()
+        out.cook(force=True)
+
+        geo.setUserData("mcp_template_id", "crystal_courtyard_v1")
+        self._setup_crystal_controls(geo)
+        if geo.parm("water_size"):
+            geo.parm("water_size").set(water_size)
+        if geo.parm("arch_count"):
+            geo.parm("arch_count").set(max(4, arch_count))
+        if geo.parm("ring_pillar_count"):
+            geo.parm("ring_pillar_count").set(max(4, ring_pillar_count))
+        if geo.parm("step_count"):
+            geo.parm("step_count").set(max(4, step_count))
+        if geo.parm("crystal_scale"):
+            geo.parm("crystal_scale").set(crystal_scale)
+        if geo.parm("seed"):
+            geo.parm("seed").set(seed)
+        out.cook(force=True)
+
+        result_geo = out.geometry()
+        return {
+            "template_id": "crystal_courtyard_v1",
+            "root_node_path": geo.path(),
+            "output_node_path": out.path(),
+            "params": {
+                "water_size": water_size,
+                "arch_count": max(4, arch_count),
+                "ring_pillar_count": max(4, ring_pillar_count),
+                "step_count": max(4, step_count),
+                "crystal_scale": crystal_scale,
+                "seed": seed,
+            },
+            "poly_count": len(result_geo.prims()) if result_geo else 0,
+            "point_count": len(result_geo.points()) if result_geo else 0,
+        }
+
+    def _build_template_crystal_courtyard_v2(self, parent, node_name: str, overrides: Dict[str, Any]) -> Dict[str, Any]:
+        name = self._sanitize_node_name(node_name or "crystal_courtyard_v2")
+        water_size = float(overrides.get("water_size", 520.0))
+        arch_count = int(overrides.get("arch_count", 28))
+        ring_pillar_count = int(overrides.get("ring_pillar_count", 22))
+        step_count = int(overrides.get("step_count", 26))
+        crystal_scale = float(overrides.get("crystal_scale", 1.0))
+        seed = int(overrides.get("seed", 0))
+
+        geo = parent.createNode("geo", name)
+        for child in geo.children():
+            child.destroy()
+
+        water = geo.createNode("grid", "water_plane")
+        water.parm("sizex").set(water_size)
+        water.parm("sizey").set(water_size)
+        water.parm("rows").set(140)
+        water.parm("cols").set(140)
+        water_noise = geo.createNode("mountain", "water_noise")
+        water_noise.setInput(0, water)
+        self._set_parm_if_exists(water_noise, "height", max(0.01, water_size * 0.0011))
+        self._set_parm_if_exists(water_noise, "elementsize", max(0.2, water_size * 0.032))
+        water_ripple = geo.createNode("mountain", "water_ripple")
+        water_ripple.setInput(0, water_noise)
+        self._set_parm_if_exists(water_ripple, "height", max(0.004, water_size * 0.00035))
+        self._set_parm_if_exists(water_ripple, "elementsize", max(0.2, water_size * 0.01))
+        water_xf = geo.createNode("xform", "water_offset")
+        water_xf.setInput(0, water_ripple)
+        water_xf.parmTuple("t").set((0.0, -water_size * 0.03, 0.0))
+
+        slab = geo.createNode("box", "arch_crystal")
+        slab.parm("sizex").set(max(1.8, water_size * 0.035 * crystal_scale))
+        slab.parm("sizey").set(max(7.0, water_size * 0.18 * crystal_scale))
+        slab.parm("sizez").set(max(1.2, water_size * 0.024 * crystal_scale))
+        slab_subdiv = geo.createNode("subdivide", "arch_subdiv")
+        slab_subdiv.setInput(0, slab)
+        self._set_parm_if_exists(slab_subdiv, "iterations", 2)
+        slab_peak = geo.createNode("peak", "arch_peak")
+        slab_peak.setInput(0, slab_subdiv)
+        self._set_parm_if_exists(slab_peak, "dist", max(0.02, water_size * 0.0023))
+        slab_fx = geo.createNode("attribwrangle", "arch_slab_fx")
+        slab_fx.setInput(0, slab_peak)
+        slab_fx.parm("class").set(0)
+        slab_fx.parm("snippet").set(
+            "float r = rand(@ptnum * 17.7 + ch(\"../seed\"));\n"
+            "float taper = fit(@P.y, -0.5, 0.5, 0.85, 1.2);\n"
+            "@P.x *= taper;\n"
+            "@P.z *= taper;\n"
+            "@P += normalize(@P + set(0.03, 0.01, 0.05)) * fit01(r, -0.12, 0.16);\n"
+        )
+
+        arch_line = geo.createNode("line", "arch_points")
+        arch_points_rebuild = geo.createNode("attribwrangle", "arch_points_rebuild")
+        arch_points_rebuild.setInput(0, arch_line)
+        arch_points_rebuild.parm("class").set(3)
+        arch_points_rebuild.parm("snippet").set(
+            "int count = max(2, chi(\"../arch_count\"));\n"
+            "for (int i = npoints(0)-1; i >= 0; --i) removepoint(0, i);\n"
+            "for (int i = 0; i < count; i++) {\n"
+            "    float u = (count <= 1) ? 0.0 : float(i) / float(count - 1);\n"
+            "    addpoint(0, set(u, 0, 0));\n"
+            "}\n"
+        )
+
+        left_arch_points = geo.createNode("attribwrangle", "left_arch_points")
+        left_arch_points.setInput(0, arch_points_rebuild)
+        left_arch_points.parm("class").set(0)
+        left_arch_points.parm("snippet").set(
+            "float u = float(@ptnum) / max(1.0, float(npoints(0) - 1));\n"
+            "float ws = ch(\"../water_size\");\n"
+            "float depth = fit(u, 0.0, 1.0, ws*0.36, -ws*0.46);\n"
+            "float side = ws * (0.36 - pow(u, 1.22) * 0.19);\n"
+            "float lift = ws * (0.05 + pow(sin(u*M_PI), 1.45) * 0.21);\n"
+            "float jitter = fit01(rand(@ptnum*13.17 + ch(\"../seed\")), -ws*0.012, ws*0.012);\n"
+            "@P = set(-side + jitter, lift, depth + jitter * 0.35);\n"
+            "f@pscale = fit01(rand(@ptnum*31.17 + ch(\"../seed\")), 0.82, 1.30) * ch(\"../crystal_scale\");\n"
+            "v@N = normalize(set(1.0, 0.0, 0.0));\n"
+            "v@up = {0,1,0};\n"
+        )
+        left_arch_copy = geo.createNode("copytopoints", "left_arch_copy")
+        left_arch_copy.setInput(0, slab_fx)
+        left_arch_copy.setInput(1, left_arch_points)
+        self._set_parm_if_exists(left_arch_copy, "pack", 0)
+
+        right_arch_points = geo.createNode("attribwrangle", "right_arch_points")
+        right_arch_points.setInput(0, arch_points_rebuild)
+        right_arch_points.parm("class").set(0)
+        right_arch_points.parm("snippet").set(
+            "float u = float(@ptnum) / max(1.0, float(npoints(0) - 1));\n"
+            "float ws = ch(\"../water_size\");\n"
+            "float depth = fit(u, 0.0, 1.0, ws*0.36, -ws*0.46);\n"
+            "float side = ws * (0.36 - pow(u, 1.22) * 0.19);\n"
+            "float lift = ws * (0.05 + pow(sin(u*M_PI), 1.45) * 0.21);\n"
+            "float jitter = fit01(rand(@ptnum*19.37 + ch(\"../seed\")), -ws*0.012, ws*0.012);\n"
+            "@P = set(side + jitter, lift, depth + jitter * 0.35);\n"
+            "f@pscale = fit01(rand(@ptnum*27.07 + ch(\"../seed\")), 0.82, 1.30) * ch(\"../crystal_scale\");\n"
+            "v@N = normalize(set(-1.0, 0.0, 0.0));\n"
+            "v@up = {0,1,0};\n"
+        )
+        right_arch_copy = geo.createNode("copytopoints", "right_arch_copy")
+        right_arch_copy.setInput(0, slab_fx)
+        right_arch_copy.setInput(1, right_arch_points)
+        self._set_parm_if_exists(right_arch_copy, "pack", 0)
+        arch_copy = geo.createNode("merge", "arch_copy")
+        arch_copy.setInput(0, left_arch_copy)
+        arch_copy.setInput(1, right_arch_copy)
+
+        ring_pts = geo.createNode("circle", "ring_points")
+        self._set_parm_if_exists(ring_pts, "type", 1)
+        self._set_parm_if_exists(ring_pts, "arc", 360)
+        self._set_parm_if_exists(ring_pts, "divs", max(4, ring_pillar_count))
+        self._set_parm_if_exists(ring_pts, "numdivs", max(4, ring_pillar_count))
+        self._set_parm_if_exists(ring_pts, "radx", water_size * 0.62)
+        self._set_parm_if_exists(ring_pts, "rady", water_size * 0.62)
+        ring_pts_fx = geo.createNode("attribwrangle", "ring_points_fx")
+        ring_pts_fx.setInput(0, ring_pts)
+        ring_pts_fx.parm("class").set(0)
+        ring_pts_fx.parm("snippet").set(
+            "float ws = ch(\"../water_size\");\n"
+            "float ringz = @P.y;\n"
+            "float r = rand(@ptnum*7.31 + ch(\"../seed\") + 9.0);\n"
+            "@P = set(@P.x, fit01(r, ws*0.01, ws*0.095), ringz * 1.05);\n"
+            "@P *= fit01(rand(@ptnum*4.31 + ch(\"../seed\")), 0.95, 1.06);\n"
+            "f@pscale = fit01(rand(@ptnum*9.73 + ch(\"../seed\")), 0.75, 1.30) * ch(\"../crystal_scale\");\n"
+            "v@N = normalize(set(@P.x, 0.0, @P.z));\n"
+            "v@up = {0,1,0};\n"
+        )
+
+        ring_crystal = geo.createNode("box", "ring_crystal")
+        ring_crystal.parm("sizex").set(max(1.0, water_size * 0.014 * crystal_scale))
+        ring_crystal.parm("sizey").set(max(7.0, water_size * 0.21 * crystal_scale))
+        ring_crystal.parm("sizez").set(max(1.0, water_size * 0.014 * crystal_scale))
+        ring_peak = geo.createNode("peak", "ring_peak")
+        ring_peak.setInput(0, ring_crystal)
+        self._set_parm_if_exists(ring_peak, "dist", max(0.012, water_size * 0.0018))
+        ring_copy = geo.createNode("copytopoints", "ring_copy")
+        ring_copy.setInput(0, ring_peak)
+        ring_copy.setInput(1, ring_pts_fx)
+        self._set_parm_if_exists(ring_copy, "pack", 0)
+
+        step_pts = geo.createNode("line", "step_points")
+        step_points_rebuild = geo.createNode("attribwrangle", "step_points_rebuild")
+        step_points_rebuild.setInput(0, step_pts)
+        step_points_rebuild.parm("class").set(3)
+        step_points_rebuild.parm("snippet").set(
+            "int count = max(2, chi(\"../step_count\"));\n"
+            "for (int i = npoints(0)-1; i >= 0; --i) removepoint(0, i);\n"
+            "for (int i = 0; i < count; i++) {\n"
+            "    float u = (count <= 1) ? 0.0 : float(i) / float(count - 1);\n"
+            "    addpoint(0, set(u, 0, 0));\n"
+            "}\n"
+        )
+        step_shape = geo.createNode("attribwrangle", "step_shape")
+        step_shape.setInput(0, step_points_rebuild)
+        step_shape.parm("class").set(0)
+        step_shape.parm("snippet").set(
+            "float u = float(@ptnum) / max(1.0, float(npoints(0) - 1));\n"
+            "float ws = ch(\"../water_size\");\n"
+            "float stair = floor(u * max(4.0, float(chi(\"../step_count\")))) * ws * 0.0019;\n"
+            "float x = sin((u * 1.5 + 0.08) * M_PI) * ws * 0.028;\n"
+            "@P = set(x, ws*0.004 + stair, fit(u, 0.0, 1.0, ws*0.34, -ws*0.42));\n"
+            "v@N = normalize(set(-x, 0.0, -1.0));\n"
+            "v@up = {0,1,0};\n"
+        )
+        step_box = geo.createNode("box", "step_box")
+        step_box.parm("sizex").set(max(7.0, water_size * 0.13))
+        step_box.parm("sizey").set(max(0.3, water_size * 0.004))
+        step_box.parm("sizez").set(max(2.1, water_size * 0.03))
+        step_peak = geo.createNode("peak", "step_peak")
+        step_peak.setInput(0, step_box)
+        self._set_parm_if_exists(step_peak, "dist", max(0.003, water_size * 0.00045))
+        step_copy = geo.createNode("copytopoints", "step_copy")
+        step_copy.setInput(0, step_peak)
+        step_copy.setInput(1, step_shape)
+        self._set_parm_if_exists(step_copy, "pack", 0)
+
+        gate_post_points = geo.createNode("line", "gate_post_points")
+        gate_points_rebuild = geo.createNode("attribwrangle", "gate_post_points_rebuild")
+        gate_points_rebuild.setInput(0, gate_post_points)
+        gate_points_rebuild.parm("class").set(3)
+        gate_points_rebuild.parm("snippet").set(
+            "for (int i = npoints(0)-1; i >= 0; --i) removepoint(0, i);\n"
+            "addpoint(0, set(0,0,0));\n"
+            "addpoint(0, set(1,0,0));\n"
+        )
+        gate_post_points_fx = geo.createNode("attribwrangle", "gate_post_points_fx")
+        gate_post_points_fx.setInput(0, gate_points_rebuild)
+        gate_post_points_fx.parm("class").set(0)
+        gate_post_points_fx.parm("snippet").set(
+            "float ws = ch(\"../water_size\");\n"
+            "float side = (@ptnum == 0) ? -1.0 : 1.0;\n"
+            "@P = set(side * ws * 0.16, ws * 0.14, -ws * 0.47);\n"
+            "f@pscale = fit01(rand(@ptnum*3.11 + ch(\"../seed\")), 0.95, 1.06);\n"
+        )
+        gate_post = geo.createNode("box", "gate_post")
+        gate_post.parm("sizex").set(max(2.2, water_size * 0.025))
+        gate_post.parm("sizey").set(max(8.5, water_size * 0.28))
+        gate_post.parm("sizez").set(max(2.0, water_size * 0.02))
+        gate_post_peak = geo.createNode("peak", "gate_post_peak")
+        gate_post_peak.setInput(0, gate_post)
+        self._set_parm_if_exists(gate_post_peak, "dist", max(0.004, water_size * 0.0008))
+        gate_posts_copy = geo.createNode("copytopoints", "gate_posts_copy")
+        gate_posts_copy.setInput(0, gate_post_peak)
+        gate_posts_copy.setInput(1, gate_post_points_fx)
+        self._set_parm_if_exists(gate_posts_copy, "pack", 0)
+
+        gate_lintel = geo.createNode("box", "gate_lintel")
+        gate_lintel.parm("sizex").set(max(6.0, water_size * 0.36))
+        gate_lintel.parm("sizey").set(max(1.6, water_size * 0.03))
+        gate_lintel.parm("sizez").set(max(1.8, water_size * 0.018))
+        gate_lintel_xf = geo.createNode("xform", "gate_lintel_xf")
+        gate_lintel_xf.setInput(0, gate_lintel)
+        gate_lintel_xf.parmTuple("t").set((0.0, water_size * 0.29, -water_size * 0.47))
+        gate_structure = geo.createNode("merge", "gate_structure")
+        gate_structure.setInput(0, gate_posts_copy)
+        gate_structure.setInput(1, gate_lintel_xf)
+
+        burst_src = geo.createNode("sphere", "center_points_src")
+        self._set_parm_if_exists(burst_src, "type", 1)
+        self._set_parm_if_exists(burst_src, "radx", water_size * 0.03)
+        self._set_parm_if_exists(burst_src, "rady", water_size * 0.022)
+        self._set_parm_if_exists(burst_src, "radz", water_size * 0.03)
+        burst_src_xf = geo.createNode("xform", "center_points_xf")
+        burst_src_xf.setInput(0, burst_src)
+        burst_src_xf.parmTuple("t").set((0.0, water_size * 0.034, -water_size * 0.2))
+        burst_scatter = geo.createNode("scatter", "center_scatter")
+        burst_scatter.setInput(0, burst_src_xf)
+        burst_scatter.parm("npts").set(24)
+        if burst_scatter.parm("seed"):
+            burst_scatter.parm("seed").set(seed + 17)
+        burst_pts_fx = geo.createNode("attribwrangle", "center_points_fx")
+        burst_pts_fx.setInput(0, burst_scatter)
+        burst_pts_fx.parm("class").set(0)
+        burst_pts_fx.parm("snippet").set(
+            "float ws = ch(\"../water_size\");\n"
+            "float r = rand(@ptnum*5.71 + ch(\"../seed\") + 77.0);\n"
+            "vector dir = normalize(@P + set(0.01,0.02,0.01));\n"
+            "@P += dir * fit01(r, 0.0, ws*0.022);\n"
+            "f@pscale = fit01(rand(@ptnum*9.19 + ch(\"../seed\")), 0.38, 0.96) * ch(\"../crystal_scale\");\n"
+            "v@N = dir;\n"
+            "v@up = {0,1,0};\n"
+        )
+        shard = geo.createNode("box", "center_shard")
+        shard.parm("sizex").set(max(0.8, water_size * 0.01))
+        shard.parm("sizey").set(max(1.7, water_size * 0.032))
+        shard.parm("sizez").set(max(0.7, water_size * 0.009))
+        shard_fx = geo.createNode("attribwrangle", "center_shard_fx")
+        shard_fx.setInput(0, shard)
+        shard_fx.parm("class").set(0)
+        shard_fx.parm("snippet").set(
+            "float r = rand(@ptnum * 11.3 + ch(\"../seed\") + 33.0);\n"
+            "@P += normalize(@P + set(0.2,0.1,0.15)) * fit01(r, -0.08, 0.12);\n"
+        )
+        burst_copy = geo.createNode("copytopoints", "center_copy")
+        burst_copy.setInput(0, shard_fx)
+        burst_copy.setInput(1, burst_pts_fx)
+        self._set_parm_if_exists(burst_copy, "pack", 0)
+
+        side_cluster_src = geo.createNode("sphere", "side_cluster_src")
+        self._set_parm_if_exists(side_cluster_src, "type", 1)
+        self._set_parm_if_exists(side_cluster_src, "radx", water_size * 0.09)
+        self._set_parm_if_exists(side_cluster_src, "rady", water_size * 0.03)
+        self._set_parm_if_exists(side_cluster_src, "radz", water_size * 0.08)
+        side_cluster_xf = geo.createNode("xform", "side_cluster_xf")
+        side_cluster_xf.setInput(0, side_cluster_src)
+        side_cluster_xf.parmTuple("t").set((-water_size * 0.26, water_size * 0.02, -water_size * 0.12))
+        side_cluster_scatter = geo.createNode("scatter", "side_cluster_scatter")
+        side_cluster_scatter.setInput(0, side_cluster_xf)
+        side_cluster_scatter.parm("npts").set(56)
+        if side_cluster_scatter.parm("seed"):
+            side_cluster_scatter.parm("seed").set(seed + 31)
+        side_cluster_pts_fx = geo.createNode("attribwrangle", "side_cluster_pts_fx")
+        side_cluster_pts_fx.setInput(0, side_cluster_scatter)
+        side_cluster_pts_fx.parm("class").set(0)
+        side_cluster_pts_fx.parm("snippet").set(
+            "float ws = ch(\"../water_size\");\n"
+            "f@pscale = fit01(rand(@ptnum*4.31 + ch(\"../seed\")), 0.45, 1.22) * ch(\"../crystal_scale\");\n"
+            "v@N = normalize(@P + set(0.0, ws*0.02, 0.0));\n"
+            "v@up = {0,1,0};\n"
+        )
+        side_cluster_copy_l = geo.createNode("copytopoints", "side_cluster_copy_l")
+        side_cluster_copy_l.setInput(0, shard_fx)
+        side_cluster_copy_l.setInput(1, side_cluster_pts_fx)
+        self._set_parm_if_exists(side_cluster_copy_l, "pack", 0)
+        side_cluster_copy_r = geo.createNode("xform", "side_cluster_copy_r")
+        side_cluster_copy_r.setInput(0, side_cluster_copy_l)
+        side_cluster_copy_r.parmTuple("s").set((-1.0, 1.0, 1.0))
+        side_cluster_copy_r.parmTuple("t").set((water_size * 0.52, 0.0, 0.0))
+        side_clusters = geo.createNode("merge", "side_clusters")
+        side_clusters.setInput(0, side_cluster_copy_l)
+        side_clusters.setInput(1, side_cluster_copy_r)
+
+        bg_line = geo.createNode("line", "bg_spire_points")
+        bg_points_rebuild = geo.createNode("attribwrangle", "bg_spire_points_rebuild")
+        bg_points_rebuild.setInput(0, bg_line)
+        bg_points_rebuild.parm("class").set(3)
+        bg_points_rebuild.parm("snippet").set(
+            "int count = 9;\n"
+            "for (int i = npoints(0)-1; i >= 0; --i) removepoint(0, i);\n"
+            "for (int i = 0; i < count; i++) {\n"
+            "    float u = (count <= 1) ? 0.0 : float(i) / float(count - 1);\n"
+            "    addpoint(0, set(u, 0, 0));\n"
+            "}\n"
+        )
+        bg_line_fx = geo.createNode("attribwrangle", "bg_spire_points_fx")
+        bg_line_fx.setInput(0, bg_points_rebuild)
+        bg_line_fx.parm("class").set(0)
+        bg_line_fx.parm("snippet").set(
+            "float ws = ch(\"../water_size\");\n"
+            "float u = float(@ptnum) / max(1.0, float(npoints(0) - 1));\n"
+            "@P = set(fit(u,0,1,-ws*0.34,ws*0.34), ws*0.03, -ws*0.58 + sin(u*6.0)*ws*0.02);\n"
+            "f@pscale = fit01(rand(@ptnum*8.1 + ch(\"../seed\")), 0.9, 1.18);\n"
+        )
+        bg_spire = geo.createNode("box", "bg_spire")
+        bg_spire.parm("sizex").set(max(1.8, water_size * 0.016))
+        bg_spire.parm("sizey").set(max(9.0, water_size * 0.21))
+        bg_spire.parm("sizez").set(max(1.6, water_size * 0.014))
+        bg_spire_peak = geo.createNode("peak", "bg_spire_peak")
+        bg_spire_peak.setInput(0, bg_spire)
+        self._set_parm_if_exists(bg_spire_peak, "dist", max(0.01, water_size * 0.0014))
+        bg_spire_copy = geo.createNode("copytopoints", "bg_spire_copy")
+        bg_spire_copy.setInput(0, bg_spire_peak)
+        bg_spire_copy.setInput(1, bg_line_fx)
+        self._set_parm_if_exists(bg_spire_copy, "pack", 0)
+
+        merge_features = geo.createNode("merge", "merge_features")
+        merge_features.setInput(0, arch_copy)
+        merge_features.setInput(1, ring_copy)
+        merge_features.setInput(2, step_copy)
+        merge_features.setInput(3, gate_structure)
+        merge_features.setInput(4, burst_copy)
+        merge_features.setInput(5, side_clusters)
+        merge_features.setInput(6, bg_spire_copy)
+
+        out_features = geo.createNode("null", "OUT_FEATURES")
+        out_features.setInput(0, merge_features)
+
+        merge = geo.createNode("merge", "merge_scene")
+        merge.setInput(0, water_xf)
+        merge.setInput(1, merge_features)
+
+        out = geo.createNode("null", "OUT")
+        out.setInput(0, merge)
+        out.setDisplayFlag(True)
+        out.setRenderFlag(True)
+        geo.layoutChildren()
+        out.cook(force=True)
+
+        geo.setUserData("mcp_template_id", "crystal_courtyard_v2")
+        self._setup_crystal_controls(geo)
+        if geo.parm("water_size"):
+            geo.parm("water_size").set(water_size)
+        if geo.parm("arch_count"):
+            geo.parm("arch_count").set(max(4, arch_count))
+        if geo.parm("ring_pillar_count"):
+            geo.parm("ring_pillar_count").set(max(4, ring_pillar_count))
+        if geo.parm("step_count"):
+            geo.parm("step_count").set(max(4, step_count))
+        if geo.parm("crystal_scale"):
+            geo.parm("crystal_scale").set(crystal_scale)
+        if geo.parm("seed"):
+            geo.parm("seed").set(seed)
+        out.cook(force=True)
+        result_geo = out.geometry()
+
+        return {
+            "template_id": "crystal_courtyard_v2",
+            "root_node_path": geo.path(),
+            "output_node_path": out.path(),
+            "params": {
+                "water_size": water_size,
+                "arch_count": max(4, arch_count),
+                "ring_pillar_count": max(4, ring_pillar_count),
+                "step_count": max(4, step_count),
+                "crystal_scale": crystal_scale,
                 "seed": seed,
             },
             "poly_count": len(result_geo.prims()) if result_geo else 0,
