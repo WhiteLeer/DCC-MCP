@@ -166,6 +166,15 @@ def create_server(name: str = "Houdini-Bridge") -> FastMCP:
         )
 
     @mcp.tool()
+    async def inspect_geometry(
+        root_path: str,
+    ) -> dict:
+        return await invoke_operation(
+            "inspect_geometry",
+            {"root_path": root_path},
+        )
+
+    @mcp.tool()
     async def create_box(
         node_name: str = "box",
         size_x: float = 1.0,
@@ -445,10 +454,36 @@ def create_server(name: str = "Houdini-Bridge") -> FastMCP:
         camera_path: str = "",
         width: int = 1024,
         height: int = 1024,
+        capture_mode: str = "auto",
     ) -> dict:
         return await invoke_operation(
             "capture_screenshot",
-            {"output_path": output_path, "camera_path": camera_path, "width": width, "height": height},
+            {
+                "output_path": output_path,
+                "camera_path": camera_path,
+                "width": width,
+                "height": height,
+                "capture_mode": capture_mode,
+            },
+        )
+
+    @mcp.tool()
+    async def frame_camera_on_geo(
+        geo_path: str,
+        camera_path: str = "/obj/cam1",
+        distance_scale: float = 2.2,
+        height_scale: float = 0.65,
+        view: str = "front",
+    ) -> dict:
+        return await invoke_operation(
+            "frame_camera_on_geo",
+            {
+                "geo_path": geo_path,
+                "camera_path": camera_path,
+                "distance_scale": distance_scale,
+                "height_scale": height_scale,
+                "view": view,
+            },
         )
 
     @mcp.tool()
