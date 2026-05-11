@@ -203,6 +203,46 @@ def create_server(name: str = "Substance-Designer-Bridge") -> FastMCP:
         )
 
     @mcp.tool()
+    async def extract_model_uv_reference(
+        input_model_path: str,
+        output_dir: str = "",
+        image_size: int = 2048,
+        material_filter: str = "",
+    ) -> dict:
+        return await invoke_operation(
+            "extract_model_uv_reference",
+            {
+                "input_model_path": input_model_path,
+                "output_dir": output_dir,
+                "image_size": image_size,
+                "material_filter": material_filter,
+            },
+        )
+
+    @mcp.tool()
+    async def paint_heart_on_texture(
+        input_path: str,
+        output_path: str = "",
+        center_uv: list[float] | None = None,
+        size_uv: float = 0.08,
+        softness: float = 0.35,
+        opacity: float = 0.88,
+        color_rgba: list[int] | None = None,
+    ) -> dict:
+        return await invoke_operation(
+            "paint_heart_on_texture",
+            {
+                "input_path": input_path,
+                "output_path": output_path,
+                "center_uv": center_uv or [0.5, 0.5],
+                "size_uv": size_uv,
+                "softness": softness,
+                "opacity": opacity,
+                "color_rgba": color_rgba or [255, 120, 180, 255],
+            },
+        )
+
+    @mcp.tool()
     async def workflow_run(
         steps: list[dict],
         stop_on_error: bool = True,

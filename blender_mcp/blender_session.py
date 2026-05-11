@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -42,6 +43,10 @@ class BlenderSessionBackend:
             return self.merge_by_distance(params)
         if operation == "capture_screenshot":
             return self.capture_screenshot(params)
+        if operation == "plan_camera_from_markdown":
+            return self.plan_camera_from_markdown(params)
+        if operation == "apply_camera_plan_to_blend":
+            return self.apply_camera_plan_to_blend(params)
 
         return {"success": False, "error": f"Unknown operation: {operation}", "error_type": "UnknownOperation"}
 
@@ -529,4 +534,363 @@ _ok({{"output_path": r"{output_path}", "width": {width}, "height": {height}, "in
             return result
         data = result["data"]
         message = f"Captured Blender screenshot: {Path(output_path).name}"
+        return {"success": True, "message": message, "prompt": message, "error": None, "context": data}
+
+    def plan_camera_from_markdown(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        markdown_path = str(params.get("markdown_path", "")).strip()
+        if not markdown_path:
+            raise RuntimeError("markdown_path is required")
+        source = Path(markdown_path)
+        if not source.exists():
+            raise RuntimeError(f"File not found: {markdown_path}")
+
+        fps = max(1, int(params.get("fps", 30)))
+        output_path = str(params.get("output_path", "")).strip()
+        if not output_path:
+            output_path = str(source.with_name(f"{source.stem}_camera_plan.json"))
+
+        raw = source.read_text(encoding="utf-8", errors="ignore")
+        shot_rows = self._parse_storyboard_table(raw)
+        if not shot_rows:
+            raise RuntimeError("No storyboard table rows found in markdown")
+
+        shots = []
+        for idx, row in enumerate(shot_rows, start=1):
+            shot_name = row.get("shot", str(idx))
+            start_sec, end_sec = self._parse_time_range(row.get("time", ""))
+            start_frame = int(round(start_sec * fps))
+            end_frame = int(round(end_sec * fps))
+            if end_frame <= start_frame:
+                end_frame = start_frame + 1
+
+            profile = self._infer_camera_profile(
+                design_goal=row.get("goal", ""),
+                movement=row.get("movement", ""),
+                cut_note=row.get("cut", ""),
+            )
+            profile["start_frame"] = start_frame
+            profile["end_frame"] = end_frame
+            profile["duration_sec"] = round((end_frame - start_frame) / float(fps), 3)
+            profile["shot_label"] = shot_name
+            profile["time_label"] = row.get("time", "")
+            profile["design_goal"] = row.get("goal", "")
+            profile["movement_note"] = row.get("movement", "")
+            profile["cut_note"] = row.get("cut", "")
+            shots.append(profile)
+
+        timeline_start = min(s["start_frame"] for s in shots)
+        timeline_end = max(s["end_frame"] for s in shots)
+        plan = {
+            "source_markdown": str(source),
+            "fps": fps,
+            "timeline": {
+                "start_frame": timeline_start,
+                "end_frame": timeline_end,
+                "total_frames": timeline_end - timeline_start,
+                "total_seconds": round((timeline_end - timeline_start) / float(fps), 3),
+            },
+            "global_recommendations": {
+                "fov_wide_range": [24, 32],
+                "fov_close_range": [38, 50],
+                "curve_interpolation": "BEZIER_EASE_IN_OUT",
+                "max_displacement_per_2s_in_character_height": [0.6, 1.0],
+            },
+            "shots": shots,
+        }
+
+        out_file = Path(output_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(plan, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        message = f"Planned {len(shots)} camera shots from markdown"
+        return {
+            "success": True,
+            "message": message,
+            "prompt": message,
+            "error": None,
+            "context": {
+                "markdown_path": str(source),
+                "output_path": str(out_file),
+                "shot_count": len(shots),
+                "fps": fps,
+                "timeline": plan["timeline"],
+                "shots": shots,
+            },
+        }
+
+    def _parse_storyboard_table(self, markdown: str) -> list[dict[str, str]]:
+        rows: list[dict[str, str]] = []
+        for line in markdown.splitlines():
+            s = line.strip()
+            if not s.startswith("|"):
+                continue
+            if "---" in s:
+                continue
+            parts = [p.strip() for p in s.strip("|").split("|")]
+            if len(parts) < 5:
+                continue
+            if parts[0] in {"镜头", "Shot"}:
+                continue
+            rows.append(
+                {
+                    "shot": parts[0],
+                    "time": parts[1],
+                    "goal": parts[2],
+                    "movement": parts[3],
+                    "cut": parts[4],
+                }
+            )
+        return rows
+
+    def _parse_time_range(self, text: str) -> tuple[float, float]:
+        m = re.search(r"(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)", text)
+        if m:
+            a = float(m.group(1))
+            b = float(m.group(2))
+            if b < a:
+                a, b = b, a
+            return a, b
+        m2 = re.search(r"(\d+(?:\.\d+)?)", text)
+        if m2:
+            a = float(m2.group(1))
+            return a, a + 1.0
+        return 0.0, 1.0
+
+    def _infer_camera_profile(self, design_goal: str, movement: str, cut_note: str) -> dict[str, Any]:
+        text = f"{design_goal} {movement} {cut_note}"
+        profile: dict[str, Any] = {
+            "shot_type": "mid",
+            "fov_start": 32.0,
+            "fov_end": 32.0,
+            "distance_scale": 1.0,
+            "height_offset": 0.0,
+            "arc_degrees": 0.0,
+            "lateral_move": 0.0,
+            "dolly": 0.0,
+            "vertical_move": 0.0,
+            "handheld_noise": 0.0,
+            "hold_last_sec": 0.0,
+            "interpolation": "BEZIER",
+        }
+
+        if any(k in text for k in ["大全景", "全身远景", "广角", "全景"]):
+            profile["shot_type"] = "wide"
+            profile["fov_start"] = 26.0
+            profile["fov_end"] = 24.0
+            profile["distance_scale"] = 1.35
+        elif any(k in text for k in ["全身", "中景", "3/4侧"]):
+            profile["shot_type"] = "full_or_mid"
+            profile["fov_start"] = 30.0
+            profile["fov_end"] = 32.0
+            profile["distance_scale"] = 1.05
+        elif any(k in text for k in ["半身", "中近景", "胸像"]):
+            profile["shot_type"] = "half_or_bust"
+            profile["fov_start"] = 38.0
+            profile["fov_end"] = 44.0
+            profile["distance_scale"] = 0.75
+        elif any(k in text for k in ["近景", "面部", "特写"]):
+            profile["shot_type"] = "closeup"
+            profile["fov_start"] = 44.0
+            profile["fov_end"] = 48.0
+            profile["distance_scale"] = 0.6
+
+        if "低机位" in text:
+            profile["height_offset"] = -0.35
+        if any(k in text for k in ["微升高", "升高"]):
+            profile["vertical_move"] = 0.2
+        if any(k in text for k in ["后退", "后拉"]):
+            profile["dolly"] = -1.0
+        if any(k in text for k in ["推近", "慢推近"]):
+            profile["dolly"] = 0.8
+        if any(k in text for k in ["弧", "绕", "圆弧", "弧线"]):
+            profile["arc_degrees"] = 20.0 if "1/4" not in text else 90.0
+        if any(k in text for k in ["侧移", "左前45", "右弧"]):
+            profile["lateral_move"] = 0.7
+        if any(k in text for k in ["∞", "字"]):
+            profile["lateral_move"] = 0.35
+            profile["vertical_move"] = 0.08
+            profile["interpolation"] = "BEZIER_LOOP_LIKE"
+        if any(k in text for k in ["手持", "摇动"]):
+            profile["handheld_noise"] = 0.25
+        if any(k in text for k in ["定格", "刹住", "稳住"]):
+            profile["hold_last_sec"] = 0.5 if "定格" in text else 0.4
+
+        return profile
+
+    def apply_camera_plan_to_blend(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        plan_path = str(params.get("plan_path", "")).strip()
+        if not plan_path:
+            raise RuntimeError("plan_path is required")
+        plan_file = Path(plan_path)
+        if not plan_file.exists():
+            raise RuntimeError(f"Plan file not found: {plan_path}")
+
+        input_blend = str(params.get("input_blend", "")).strip()
+        output_blend = str(params.get("output_blend", "")).strip()
+        if not output_blend:
+            output_blend = str(plan_file.with_name(f"{plan_file.stem}_applied.blend"))
+
+        camera_name = str(params.get("camera_name", "")).strip() or "MCP_Camera"
+        target_name = str(params.get("target_name", "")).strip()
+
+        plan = json.loads(plan_file.read_text(encoding="utf-8"))
+        shots = plan.get("shots") or []
+        if not shots:
+            raise RuntimeError("No shots found in plan")
+        fps = max(1, int(plan.get("fps", 30)))
+        timeline = plan.get("timeline") or {}
+        frame_start = int(timeline.get("start_frame", min(int(s.get("start_frame", 0)) for s in shots)))
+        frame_end = int(timeline.get("end_frame", max(int(s.get("end_frame", 1)) for s in shots)))
+
+        shots_json = json.dumps(shots, ensure_ascii=False)
+        script = f"""
+import bpy
+import json
+import math
+
+input_blend = r\"{input_blend}\"
+if input_blend:
+    bpy.ops.wm.open_mainfile(filepath=input_blend)
+
+scene = bpy.context.scene
+scene.render.fps = {fps}
+scene.frame_start = {frame_start}
+scene.frame_end = {frame_end}
+
+shots = json.loads(r'''{shots_json}''')
+camera_name = r\"{camera_name}\"
+target_name = r\"{target_name}\"
+
+cam_obj = bpy.data.objects.get(camera_name)
+if cam_obj is None:
+    if scene.camera and scene.camera.type == 'CAMERA':
+        cam_obj = scene.camera
+        cam_obj.name = camera_name
+    else:
+        bpy.ops.object.camera_add(location=(0.0, -4.0, 1.6), rotation=(math.radians(80), 0.0, 0.0))
+        cam_obj = bpy.context.active_object
+        cam_obj.name = camera_name
+scene.camera = cam_obj
+
+target_obj = None
+if target_name:
+    target_obj = bpy.data.objects.get(target_name)
+if target_obj is None:
+    for obj in bpy.data.objects:
+        if obj.type == 'ARMATURE':
+            target_obj = obj
+            break
+if target_obj is None:
+    target_obj = bpy.data.objects.get("MCP_Camera_Target")
+if target_obj is None:
+    bpy.ops.object.empty_add(type='PLAIN_AXES', location=(0.0, 0.0, 1.0))
+    target_obj = bpy.context.active_object
+    target_obj.name = "MCP_Camera_Target"
+
+track = None
+for c in cam_obj.constraints:
+    if c.type == 'TRACK_TO':
+        track = c
+        break
+if track is None:
+    track = cam_obj.constraints.new(type='TRACK_TO')
+track.target = target_obj
+track.track_axis = 'TRACK_NEGATIVE_Z'
+track.up_axis = 'UP_Y'
+
+cam_data = cam_obj.data
+if cam_data is None:
+    raise RuntimeError("Camera data missing")
+
+for fc in cam_obj.animation_data.action.fcurves[:] if cam_obj.animation_data and cam_obj.animation_data.action else []:
+    cam_obj.animation_data.action.fcurves.remove(fc)
+for fc in cam_data.animation_data.action.fcurves[:] if cam_data.animation_data and cam_data.animation_data.action else []:
+    cam_data.animation_data.action.fcurves.remove(fc)
+
+target_loc = target_obj.matrix_world.translation.copy()
+base_height = float(target_loc.z) + 1.45
+angle_acc = math.radians(180.0)
+key_count = 0
+
+for shot in shots:
+    sf = int(shot.get("start_frame", 0))
+    ef = int(shot.get("end_frame", sf + 1))
+    if ef <= sf:
+        ef = sf + 1
+    fov0 = float(shot.get("fov_start", 32.0))
+    fov1 = float(shot.get("fov_end", fov0))
+    dist_scale = float(shot.get("distance_scale", 1.0))
+    h_off = float(shot.get("height_offset", 0.0))
+    arc_deg = float(shot.get("arc_degrees", 0.0))
+    lateral = float(shot.get("lateral_move", 0.0))
+    dolly = float(shot.get("dolly", 0.0))
+    v_move = float(shot.get("vertical_move", 0.0))
+    hold_last = float(shot.get("hold_last_sec", 0.0))
+
+    base_dist = 3.2 * max(0.25, dist_scale)
+    dist0 = max(0.6, base_dist)
+    dist1 = max(0.6, base_dist - dolly)
+
+    a0 = angle_acc
+    a1 = angle_acc + math.radians(arc_deg)
+
+    x0 = target_loc.x + math.sin(a0) * dist0 + lateral * 0.35
+    y0 = target_loc.y + math.cos(a0) * dist0
+    z0 = base_height + h_off
+    x1 = target_loc.x + math.sin(a1) * dist1 + lateral * 0.10
+    y1 = target_loc.y + math.cos(a1) * dist1
+    z1 = base_height + h_off + v_move
+
+    cam_obj.location = (x0, y0, z0)
+    cam_obj.keyframe_insert(data_path="location", frame=sf)
+    sensor_w = max(1e-5, float(cam_data.sensor_width))
+    lens0 = 0.5 * sensor_w / math.tan(math.radians(max(1.0, min(179.0, fov0))) * 0.5)
+    cam_data.lens = max(1.0, min(500.0, lens0))
+    cam_data.keyframe_insert(data_path="lens", frame=sf)
+    key_count += 2
+
+    hold_frames = int(round(max(0.0, hold_last) * {fps}))
+    move_end = ef - hold_frames if hold_frames > 0 and ef - hold_frames > sf else ef
+
+    cam_obj.location = (x1, y1, z1)
+    cam_obj.keyframe_insert(data_path="location", frame=move_end)
+    lens1 = 0.5 * sensor_w / math.tan(math.radians(max(1.0, min(179.0, fov1))) * 0.5)
+    cam_data.lens = max(1.0, min(500.0, lens1))
+    cam_data.keyframe_insert(data_path="lens", frame=move_end)
+    key_count += 2
+
+    if move_end != ef:
+        cam_obj.location = (x1, y1, z1)
+        cam_obj.keyframe_insert(data_path="location", frame=ef)
+        cam_data.lens = max(1.0, min(500.0, lens1))
+        cam_data.keyframe_insert(data_path="lens", frame=ef)
+        key_count += 2
+
+    angle_acc = a1
+
+for datablock in [cam_obj, cam_data]:
+    ad = datablock.animation_data
+    if ad and ad.action:
+        for fc in ad.action.fcurves:
+            for kp in fc.keyframe_points:
+                kp.interpolation = 'BEZIER'
+
+bpy.ops.wm.save_as_mainfile(filepath=r\"{output_blend}\")
+_ok({{
+    "input_blend": input_blend,
+    "output_blend": r\"{output_blend}\",
+    "camera_name": cam_obj.name,
+    "target_name": target_obj.name,
+    "shot_count": len(shots),
+    "keyframe_count": key_count,
+    "frame_start": scene.frame_start,
+    "frame_end": scene.frame_end,
+    "fps": scene.render.fps
+}})
+"""
+        result = self._run_blender_script(script, timeout_seconds=240)
+        if not result.get("success"):
+            return result
+        data = result["data"]
+        message = f"Applied camera plan to blend ({data.get('shot_count', 0)} shots)"
         return {"success": True, "message": message, "prompt": message, "error": None, "context": data}

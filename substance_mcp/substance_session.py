@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import shutil
+import tempfile
+import textwrap
 from pathlib import Path
 from typing import Any, Dict
 
@@ -21,6 +23,7 @@ class SubstanceSessionBackend:
         self.install_dir = Path(self.designer_exe).parent
         self.sbsrender_exe = str(self.install_dir / "sbsrender.exe")
         self.sbscooker_exe = str(self.install_dir / "sbscooker.exe")
+        self.blender_exe = self._resolve_blender_exe()
         self.current_project_path = "untitled"
 
     async def execute(self, operation: str, params: Dict[str, Any]) -> Dict[str, Any]:
@@ -48,6 +51,10 @@ class SubstanceSessionBackend:
             return self.harmonize_image_color(params)
         if operation == "harmonize_images_batch":
             return self.harmonize_images_batch(params)
+        if operation == "extract_model_uv_reference":
+            return self.extract_model_uv_reference(params)
+        if operation == "paint_heart_on_texture":
+            return self.paint_heart_on_texture(params)
 
         return {"success": False, "error": f"Unknown operation: {operation}", "error_type": "UnknownOperation"}
 
@@ -548,6 +555,149 @@ class SubstanceSessionBackend:
             },
         }
 
+    def extract_model_uv_reference(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        input_model_path = self._require_existing_file(params.get("input_model_path", ""))
+        output_dir = str(params.get("output_dir", "")).strip()
+        if not output_dir:
+            output_dir = str(Path(input_model_path).with_suffix("")) + "_uv"
+        image_size = max(256, int(params.get("image_size", 2048)))
+        material_filter = str(params.get("material_filter", "")).strip()
+
+        blender_data = self._inspect_fbx_uv(input_model_path, material_filter=material_filter)
+        materials = blender_data.get("materials", [])
+        out_root = Path(output_dir)
+        out_root.mkdir(parents=True, exist_ok=True)
+
+        material_outputs: list[dict[str, Any]] = []
+        for mat in materials:
+            mat_name = str(mat.get("name", "material"))
+            safe_name = self._safe_filename(mat_name)
+            img = Image.new("RGBA", (image_size, image_size), (255, 255, 255, 0))
+            draw = ImageDraw.Draw(img, "RGBA")
+            for poly in mat.get("polygons", []):
+                pts = []
+                for uv in poly:
+                    u = float(uv[0])
+                    v = float(uv[1])
+                    x = int(round(u * (image_size - 1)))
+                    y = int(round((1.0 - v) * (image_size - 1)))
+                    pts.append((x, y))
+                if len(pts) >= 2:
+                    draw.line(pts + [pts[0]], fill=(255, 64, 64, 230), width=1)
+
+            out_file = out_root / f"{safe_name}_uv.png"
+            img.save(out_file)
+            bounds = self._compute_uv_bounds(mat.get("polygons", []))
+            material_outputs.append(
+                {
+                    "name": mat_name,
+                    "polygon_count": int(mat.get("polygon_count", 0)),
+                    "uv_bounds": bounds,
+                    "uv_layout_path": str(out_file),
+                }
+            )
+
+        json_path = out_root / "uv_reference.json"
+        json_path.write_text(
+            json.dumps(
+                {
+                    "input_model_path": input_model_path,
+                    "image_size": image_size,
+                    "material_filter": material_filter,
+                    "materials": material_outputs,
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        message = f"Extracted UV reference for {Path(input_model_path).name} ({len(material_outputs)} materials)"
+        return {
+            "success": True,
+            "message": message,
+            "prompt": message,
+            "error": None,
+            "context": {
+                "input_model_path": input_model_path,
+                "output_dir": str(out_root),
+                "image_size": image_size,
+                "material_filter": material_filter,
+                "materials": material_outputs,
+                "json_path": str(json_path),
+            },
+        }
+
+    def paint_heart_on_texture(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        input_path = self._require_existing_file(params.get("input_path", ""))
+        output_path = str(params.get("output_path", "")).strip()
+        if not output_path:
+            src = Path(input_path)
+            output_path = str(src.with_name(f"{src.stem}_heart{src.suffix}"))
+
+        center_uv = params.get("center_uv", [0.5, 0.5]) or [0.5, 0.5]
+        if len(center_uv) != 2:
+            raise RuntimeError("center_uv must be [u, v]")
+        center_u = max(0.0, min(1.0, float(center_uv[0])))
+        center_v = max(0.0, min(1.0, float(center_uv[1])))
+
+        size_uv = max(0.005, min(1.0, float(params.get("size_uv", 0.08))))
+        softness = max(0.0, min(1.0, float(params.get("softness", 0.35))))
+        opacity = max(0.0, min(1.0, float(params.get("opacity", 0.88))))
+        color = params.get("color_rgba", [255, 120, 180, 255]) or [255, 120, 180, 255]
+        if len(color) != 4:
+            raise RuntimeError("color_rgba must be [r, g, b, a]")
+
+        image = Image.open(input_path).convert("RGBA")
+        width, height = image.size
+        cx = float(center_u * (width - 1))
+        cy = float((1.0 - center_v) * (height - 1))
+        radius = float(size_uv * min(width, height))
+
+        xs = np.arange(width, dtype=np.float32)[None, :]
+        ys = np.arange(height, dtype=np.float32)[:, None]
+        x = (xs - cx) / max(radius, 1e-4)
+        y = (ys - cy) / max(radius, 1e-4)
+
+        # Implicit heart curve: (x^2 + y^2 - 1)^3 - x^2*y^3 <= 0
+        eq = (x * x + y * y - 1.0) ** 3 - (x * x * y * y * y)
+        inside = np.clip(-eq * 7.0, 0.0, 1.0)
+        edge_pow = max(0.2, 2.5 - softness * 2.0)
+        alpha_mask = np.power(inside, edge_pow) * opacity * (float(color[3]) / 255.0)
+
+        base = np.asarray(image, dtype=np.float32) / 255.0
+        heart_rgb = np.array([float(color[0]), float(color[1]), float(color[2])], dtype=np.float32) / 255.0
+        alpha = alpha_mask[:, :, None]
+        out_rgb = base[:, :, :3] * (1.0 - alpha) + heart_rgb[None, None, :] * alpha
+        out_a = np.clip(base[:, :, 3:4], 0.0, 1.0)
+        out = np.concatenate([np.clip(out_rgb, 0.0, 1.0), out_a], axis=2)
+        out_img = Image.fromarray((out * 255.0).astype(np.uint8), mode="RGBA")
+
+        out_file = Path(output_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        if out_file.suffix.lower() in {".jpg", ".jpeg"}:
+            out_img.convert("RGB").save(out_file, quality=95)
+        else:
+            out_img.save(out_file)
+
+        message = f"Painted heart on texture: {out_file.name}"
+        return {
+            "success": True,
+            "message": message,
+            "prompt": message,
+            "error": None,
+            "context": {
+                "input_path": input_path,
+                "output_path": str(out_file),
+                "center_uv": [center_u, center_v],
+                "size_uv": size_uv,
+                "softness": softness,
+                "opacity": opacity,
+                "color_rgba": [int(color[0]), int(color[1]), int(color[2]), int(color[3])],
+                "texture_size": [width, height],
+            },
+        }
+
     def _resolve_designer_exe(self, designer_exe: str | None) -> str:
         candidates = [
             designer_exe,
@@ -558,6 +708,17 @@ class SubstanceSessionBackend:
             if candidate and Path(candidate).exists():
                 return str(Path(candidate))
         raise RuntimeError("Substance Designer executable not found")
+
+    def _resolve_blender_exe(self) -> str:
+        candidates = [
+            os.environ.get("BLENDER_EXE"),
+            r"D:\常用软件\Blender 4.2\blender.exe",
+            shutil.which("blender"),
+        ]
+        for candidate in candidates:
+            if candidate and Path(candidate).exists():
+                return str(Path(candidate))
+        return ""
 
     def _require_file(self, path_value: str, ext: str) -> str:
         path = str(path_value).strip()
@@ -578,6 +739,103 @@ class SubstanceSessionBackend:
         if not file_path.exists():
             raise RuntimeError(f"File not found: {path}")
         return str(file_path)
+
+    def _inspect_fbx_uv(self, input_model_path: str, material_filter: str = "") -> Dict[str, Any]:
+        if not self.blender_exe:
+            raise RuntimeError("Blender executable not configured, cannot inspect FBX UV")
+        model_suffix = Path(input_model_path).suffix.lower()
+        if model_suffix not in {".fbx", ".obj", ".gltf", ".glb"}:
+            raise RuntimeError(f"Unsupported model format for UV inspect: {model_suffix}")
+
+        if model_suffix == ".fbx":
+            import_stmt = f"bpy.ops.import_scene.fbx(filepath=r'''{input_model_path}''')"
+        elif model_suffix == ".obj":
+            import_stmt = f"bpy.ops.wm.obj_import(filepath=r'''{input_model_path}''')"
+        else:
+            import_stmt = f"bpy.ops.import_scene.gltf(filepath=r'''{input_model_path}''')"
+
+        with tempfile.TemporaryDirectory(prefix="substance_uv_probe_") as tmpdir:
+            tmp_path = Path(tmpdir)
+            out_json = tmp_path / "uv_data.json"
+            script_file = tmp_path / "probe.py"
+            script_body = f"""
+import bpy
+import json
+from pathlib import Path
+
+bpy.ops.object.select_all(action='SELECT')
+bpy.ops.object.delete(use_global=False)
+{import_stmt}
+
+material_filter = r'''{material_filter}'''.strip().lower()
+mat_polys = {{}}
+mat_counts = {{}}
+
+for obj in bpy.data.objects:
+    if obj.type != 'MESH' or obj.data is None:
+        continue
+    mesh = obj.data
+    if not mesh.uv_layers:
+        continue
+    uv_layer = mesh.uv_layers.active.data
+    mats = mesh.materials
+    for poly in mesh.polygons:
+        mat_idx = poly.material_index
+        mat_name = mats[mat_idx].name if mats and mat_idx < len(mats) and mats[mat_idx] else f"Material_{{mat_idx}}"
+        if material_filter and material_filter not in mat_name.lower():
+            continue
+        loops = []
+        for li in poly.loop_indices:
+            uv = uv_layer[li].uv
+            loops.append([float(uv.x), float(uv.y)])
+        if len(loops) >= 3:
+            mat_polys.setdefault(mat_name, []).append(loops)
+            mat_counts[mat_name] = mat_counts.get(mat_name, 0) + 1
+
+materials = []
+for name, polys in mat_polys.items():
+    materials.append({{
+        "name": name,
+        "polygon_count": int(mat_counts.get(name, len(polys))),
+        "polygons": polys,
+    }})
+
+Path(r'''{str(out_json)}''').write_text(json.dumps({{"materials": materials}}, ensure_ascii=False), encoding="utf-8")
+"""
+            script_file.write_text(textwrap.dedent(script_body), encoding="utf-8")
+            proc = subprocess.run(
+                [self.blender_exe, "--background", "--factory-startup", "--python", str(script_file)],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=180,
+            )
+            if proc.returncode != 0:
+                err = (proc.stderr or proc.stdout or "").strip()
+                raise RuntimeError(f"Blender UV probe failed: {err[-800:] if len(err) > 800 else err}")
+            if not out_json.exists():
+                raise RuntimeError("Blender UV probe did not produce output")
+            return json.loads(out_json.read_text(encoding="utf-8"))
+
+    def _compute_uv_bounds(self, polygons: list[Any]) -> list[float]:
+        u_values: list[float] = []
+        v_values: list[float] = []
+        for poly in polygons:
+            for uv in poly:
+                try:
+                    u_values.append(float(uv[0]))
+                    v_values.append(float(uv[1]))
+                except Exception:
+                    continue
+        if not u_values or not v_values:
+            return [0.0, 0.0, 1.0, 1.0]
+        return [float(min(u_values)), float(min(v_values)), float(max(u_values)), float(max(v_values))]
+
+    def _safe_filename(self, name: str) -> str:
+        cleaned = "".join(ch if ch.isalnum() or ch in {"_", "-", "."} else "_" for ch in str(name))
+        cleaned = cleaned.strip("._")
+        return cleaned or "material"
 
     def _channel_stats(self, arr: np.ndarray) -> Dict[str, np.ndarray]:
         flat = arr.reshape(-1, 3)

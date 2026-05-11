@@ -107,6 +107,36 @@ def create_server(name: str = "Blender-Bridge") -> FastMCP:
         )
 
     @mcp.tool()
+    async def plan_camera_from_markdown(
+        markdown_path: str,
+        output_path: str = "",
+        fps: int = 30,
+    ) -> dict:
+        return await invoke_operation(
+            "plan_camera_from_markdown",
+            {"markdown_path": markdown_path, "output_path": output_path, "fps": fps},
+        )
+
+    @mcp.tool()
+    async def apply_camera_plan_to_blend(
+        plan_path: str,
+        input_blend: str = "",
+        output_blend: str = "",
+        camera_name: str = "MCP_Camera",
+        target_name: str = "",
+    ) -> dict:
+        return await invoke_operation(
+            "apply_camera_plan_to_blend",
+            {
+                "plan_path": plan_path,
+                "input_blend": input_blend,
+                "output_blend": output_blend,
+                "camera_name": camera_name,
+                "target_name": target_name,
+            },
+        )
+
+    @mcp.tool()
     async def decimate_mesh(
         input_blend: str = "",
         output_blend: str = "",
