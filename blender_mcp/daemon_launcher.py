@@ -1,22 +1,15 @@
-﻿"""Daemon process management for the Blender backend."""
+"""Daemon process management for the Blender backend."""
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
-import subprocess
 import sys
-import time
 from pathlib import Path
 
-import psutil
+from dcc_mcp_common.daemon_launcher import ensure_daemon_running as _ensure_daemon_running
 
-from blender_mcp.utils.state_paths import (
-    get_lock_file,
-    get_state_dir,
-    get_ws_port_file,
-)
+from blender_mcp.utils.state_paths import get_lock_file, get_state_dir, get_ws_port_file
 
 
 def _repo_root() -> Path:
@@ -39,79 +32,38 @@ def _daemon_python() -> str:
     return sys.executable
 
 
-def _read_live_pid() -> int | None:
-    lock_file = get_lock_file()
-    if not lock_file.exists():
-        return None
-
-    try:
-        for line in lock_file.read_text(encoding="utf-8").splitlines():
-            if line.startswith("pid="):
-                pid = int(line.split("=", 1)[1])
-                if psutil.pid_exists(pid):
-                    return pid
-    except Exception:
-        return None
-
-    return None
-
-
-def daemon_running() -> bool:
-    return _read_live_pid() is not None
-
-
-def cleanup_stale_state() -> None:
-    state_dir = get_state_dir()
-    live_pids = {proc.pid for proc in psutil.process_iter(["pid"])}
-
-    for path in state_dir.glob("ws_port*.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            pid = int(data.get("pid", 0))
-        except Exception:
-            pid = 0
-
-        if pid <= 0 or pid not in live_pids:
-            try:
-                path.unlink()
-            except Exception:
-                pass
-
-    lock_file = get_lock_file()
-    if lock_file.exists() and _read_live_pid() is None:
-        try:
-            lock_file.unlink()
-        except Exception:
-            pass
-
-
 def ensure_daemon_running(timeout_seconds: float = 10.0) -> bool:
-    if daemon_running():
-        return True
-
-    cleanup_stale_state()
-
-    creationflags = 0
-    if os.name == "nt":
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-
-    cmd = [_daemon_python(), "-m", "blender_mcp.daemon_server"]
+    cmd_args: list[str] = []
     blender_exe = os.environ.get("BLENDER_EXE", "").strip()
     if blender_exe:
-        cmd += ["--blender-exe", blender_exe]
+        cmd_args += ["--blender-exe", blender_exe]
 
-    subprocess.Popen(
-        cmd,
-        cwd=str(_repo_root()),
-        creationflags=creationflags,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    return _ensure_daemon_running(
+        lock_file=get_lock_file(),
+        state_dir=get_state_dir(),
+        ws_port_file=get_ws_port_file(),
+        daemon_module="blender_mcp.daemon_server",
+        daemon_python=_daemon_python(),
+        repo_root=_repo_root(),
+        extra_args=cmd_args,
+        timeout_seconds=timeout_seconds,
     )
 
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
-        if daemon_running() and get_ws_port_file().exists():
-            return True
-        time.sleep(0.25)
 
-    return False
+def restart_daemon(timeout_seconds: float = 10.0) -> bool:
+    cmd_args: list[str] = []
+    blender_exe = os.environ.get("BLENDER_EXE", "").strip()
+    if blender_exe:
+        cmd_args += ["--blender-exe", blender_exe]
+
+    return _ensure_daemon_running(
+        lock_file=get_lock_file(),
+        state_dir=get_state_dir(),
+        ws_port_file=get_ws_port_file(),
+        daemon_module="blender_mcp.daemon_server",
+        daemon_python=_daemon_python(),
+        repo_root=_repo_root(),
+        extra_args=cmd_args,
+        timeout_seconds=timeout_seconds,
+        force_restart=True,
+    )

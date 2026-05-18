@@ -9,8 +9,11 @@ import shutil
 import subprocess
 import tempfile
 import textwrap
+import time
 from pathlib import Path
 from typing import Any, Dict
+
+from blender_mcp.live_client import invoke_live
 
 
 class BlenderSessionBackend:
@@ -21,6 +24,8 @@ class BlenderSessionBackend:
     async def execute(self, operation: str, params: Dict[str, Any]) -> Dict[str, Any]:
         if operation == "get_scene_state":
             return self.get_scene_state()
+        if operation == "open_blend":
+            return self.open_blend(params)
         if operation == "create_cube":
             return self.create_cube(params)
         if operation == "clean_scene":
@@ -119,6 +124,10 @@ class BlenderSessionBackend:
             return {"success": True, "data": payload.get("data", {})}
 
     def get_scene_state(self) -> Dict[str, Any]:
+        live = invoke_live("get_scene_state")
+        if live and live.get("success"):
+            return live
+
         result = self._run_blender_script(
             """
 import bpy
@@ -145,6 +154,42 @@ _ok({
                 **data,
             },
         }
+
+    def open_blend(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        path = str(params.get("path", "")).strip()
+        if not path:
+            raise RuntimeError("path is required")
+        blend_path = Path(path)
+        if not blend_path.exists():
+            raise RuntimeError(f"Blend file not found: {path}")
+
+        live = invoke_live("open_blend", {"path": str(blend_path)})
+        if live and live.get("success"):
+            data = live.get("data", {})
+            message = f"Opened live Blender scene: {blend_path.name}"
+            return {"success": True, "message": message, "prompt": message, "error": None, "data": data, "context": data}
+
+        self._check_blender_exe()
+        live_script = Path(__file__).resolve().with_name("live_server.py")
+        subprocess.Popen(
+            [self.blender_exe, str(blend_path), "--python", str(live_script)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+        )
+
+        deadline = time.time() + 30.0
+        last_live: dict | None = None
+        while time.time() < deadline:
+            last_live = invoke_live("get_scene_state", blend_path=str(blend_path))
+            if last_live and last_live.get("success"):
+                data = last_live.get("data", {})
+                message = f"Opened Blender scene with live MCP: {blend_path.name}"
+                return {"success": True, "message": message, "prompt": message, "error": None, "data": data, "context": data}
+            time.sleep(0.5)
+
+        detail = last_live.get("error") if isinstance(last_live, dict) else "Live bridge did not become ready"
+        return {"success": False, "error": detail, "error_type": "LiveBridgeStartError"}
 
     def create_cube(self, params: Dict[str, Any]) -> Dict[str, Any]:
         output_blend = params.get("output_blend", "")

@@ -31,6 +31,10 @@ def create_server(name: str = "Blender-Bridge") -> FastMCP:
         return await invoke_operation("get_scene_state", {})
 
     @mcp.tool()
+    async def open_blend(path: str) -> dict:
+        return await invoke_operation("open_blend", {"path": path})
+
+    @mcp.tool()
     async def create_cube(
         size: float = 2.0,
         location: list[float] | None = None,
