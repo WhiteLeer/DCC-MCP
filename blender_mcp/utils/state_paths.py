@@ -1,38 +1,27 @@
-﻿"""Shared state paths for Blender MCP (Codex-first)."""
+"""Shared state paths for Blender MCP (Codex-first)."""
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
+from dcc_mcp_common import state_paths as common
 
-def _get_codex_home() -> Path:
-    codex_home = os.environ.get("CODEX_HOME")
-    if codex_home:
-        return Path(codex_home)
-    return Path.home() / ".codex"
+
+_APP_SLUG = "blender-mcp"
+_ENV_VAR = "BLENDER_MCP_STATE_DIR"
 
 
 def get_state_dir() -> Path:
-    override = os.environ.get("BLENDER_MCP_STATE_DIR")
-    if override:
-        path = Path(override)
-    else:
-        path = _get_codex_home() / "mcp" / "blender-mcp"
-
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    return common.get_state_dir(_APP_SLUG, _ENV_VAR)
 
 
 def get_ws_port_file() -> Path:
-    return get_state_dir() / "ws_port.json"
+    return common.get_ws_port_file(get_state_dir())
 
 
 def get_ws_port_instance_file(pid: int | None = None) -> Path:
-    if pid is None:
-        pid = os.getpid()
-    return get_state_dir() / f"ws_port_{pid}.json"
+    return common.get_ws_port_instance_file(get_state_dir(), pid)
 
 
 def get_lock_file() -> Path:
-    return get_state_dir() / ".running.lock"
+    return common.get_lock_file(get_state_dir())

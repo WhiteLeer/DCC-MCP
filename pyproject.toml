@@ -51,7 +51,7 @@ substance-designer-mcp-daemon = "substance_mcp.daemon_server:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["houdini_mcp*", "maya_mcp*", "blender_mcp*", "substance_mcp*"]
+include = ["houdini_mcp*", "maya_mcp*", "blender_mcp*", "substance_mcp*", "dcc_mcp_common*"]
 
 [tool.black]
 line-length = 100
